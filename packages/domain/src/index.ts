@@ -30,3 +30,17 @@ export {
   officialMayActOn,
   toOfficialGrant,
 } from "./official.ts";
+
+export {
+  type BallotChoices,
+  type BallotStyle,
+  type ChoiceErrorCode,
+  type ChoiceProblem,
+  type ChoiceSummaryResult,
+  checkChoices,
+  type Contest,
+  type ContestSummary,
+  type Manifest,
+  type Selection,
+  summarizeChoices,
+} from "./manifest.ts";

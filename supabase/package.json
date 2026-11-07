@@ -16,6 +16,7 @@
     "@types/node": "24.10.1",
     "@types/pg": "8.23.1",
     "@vbt/domain": "workspace:*",
+    "@vbt/events": "workspace:*",
     "otpauth": "9.6.0",
     "pg": "8.23.1",
     "typescript": "5.9.3",

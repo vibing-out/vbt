@@ -5,9 +5,9 @@ export default defineConfig({
     include: ["src/**/*.test.ts"],
     coverage: {
       provider: "v8",
-      include: ["src/status.ts", "src/transition.ts", "src/official.ts"],
+      include: ["src/status.ts", "src/transition.ts", "src/official.ts", "src/cross-checks.ts"],
       reporter: ["text"],
-      // The transition rules and the official scope rule are the source of truth; every
+      // The transition rules, the official scope rule and the cross-checks are the source of truth; every
       // branch must be exercised.
       thresholds: {
         branches: 100,

@@ -89,6 +89,8 @@ No single system is trusted. At each stage, independent records must agree for e
 | C3 Election-night totals | Election-night report | Sum of precinct totals = county's published election-night totals |
 | C4 Certification | Certification | Certified totals = election-night totals, with every difference explained by a recorded challenge or discard |
 
+Field-level mapping from each format, and which fault fails which check: `docs/nist-mapping.md`. A check also fails when only one record has the machine, precinct or county, or one record has it twice. A failed check challenges only the challengeable ballots (`CAST`, `TALLIED_PRECINCT`, `REPORTED_UNOFFICIAL`) of the machine, precinct or county that failed; C3 names the precinct when the county's election-night report breaks down by precinct (T-10, approved by Austin on #20).
+
 **Privacy rule:** a tracking code is never linked publicly to a timestamped machine event. Machine-level timing stays official-only; the public sees dates, stages, and check results.
 
 ## Event schema (Proposed)
@@ -119,9 +121,14 @@ Table `ballot_events`, insert-only:
 | `ballot_events` | As above |
 | `batches` | id, scope (precinct or county), from_status, to_status, actor_id, created_at, ballot_count |
 | `stage_records` | id, scope, stage, merkle_root, ballot_count, totals (aggregate only), published_at, signature |
+| `machine_log_imports` (private, T-10) | id, machine_id, precinct_id, county_id, election_id, format (cdf-json or cdf-xml), file_sha256, ballots_counted, polls_opened, polls_closed, error_count, unmapped_codes, uploaded_by (auth user id), imported_at |
+| `official_results` (private, T-10) | id, scope (precinct or county), scope_id, county_id, stage (TALLIED_PRECINCT, REPORTED_UNOFFICIAL or CERTIFIED), nist_status, totals (aggregate only), ballot_count, file_sha256, uploaded_by (auth user id), imported_at |
+| `check_results` (private, T-10) | id, check_id (C1 to C4), scope (machine, precinct or county), scope_id, stage, passed, failure, mismatches (ids and counts only), batch_id, created_at |
 | sms_subscriptions (stretch, T-18) | id, tracking_code, phone_encrypted, language, created_at, expires_at (certification); deleted on STOP or certification; never exposed publicly or joined to ciphertext |
 
 No table holds a voter's name, ID, date of birth, or signature.
+
+The three T-10 tables are official-only and insert-only: RLS on, grants to `service_role` only (officials reach them through server routes that check role and MFA), never in the Data API. They hold no ballot id, tracking code or machine event time (a machine log is stored as a summary and its file hash); `ballot_events` is unchanged by T-10.
 
 ## API boundaries (Proposed)
 

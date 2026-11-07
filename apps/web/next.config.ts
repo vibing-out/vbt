@@ -1,8 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // packages/ui ships TypeScript source (shadcn monorepo layout).
-  transpilePackages: ["@vbt/ui"],
+  // @vbt/ui and @vbt/domain ship TypeScript source; Next compiles them with the app.
+  transpilePackages: ["@vbt/ui", "@vbt/domain"],
 };
 
 export default nextConfig;

@@ -18,7 +18,8 @@
 //   ### Decisions                   review only: one {"text": ...} line per resolved question, or none
 //   ### Summary                     3 to 5 bullets: what this delivers, confidence and why, what is left
 // The verdict is derived, never written by the agent: an open unambiguous fix means "fixes needed", an open
-// judgment call means "approver decisions", otherwise "clean". A failed criterion must have an open finding.
+// judgment call (or an "unambiguous fix" that says it needs no code change) means "approver decisions",
+// otherwise "clean". A failed criterion must have an open finding.
 
 export type Kind = 'review' | 'verify'
 type Section = { title: string; lines: string[] }
@@ -37,6 +38,12 @@ const RESULTS = ['pass', 'fail', 'unverified']
 const TAG = /\[(high|medium|low)\s*,\s*(open|fixed)\]/i
 const ITEM = /^(?:[-*]|\d+[.)])\s+/ // a top-level list item; indented sub-items are details of the item above
 const TEST_COUNT = /\b\d+\s+(passed|failed)\b/i
+
+// An "unambiguous fix" that says it needs no code change (human operations, a manual step, something only a person
+// can do) is an approver decision, whatever group the reviewer put it in. T-20's round 4 tagged "AC3 needs human
+// operations; not a code fix" as an unambiguous fix, which read as "fixes needed" though no code could fix it.
+const NO_CODE = /\b(not a code (fix|change)|no code (fix|change)|needs? no code|human op(eration)?s?\b|manual (step|operation)s?\b|only a (person|human) can)/i
+export const needsNoCode = (text: string): boolean => NO_CODE.test(text)
 
 const isBlank = (lines: string[]) => lines.every(line => line.trim() === '' || /^none\.?$/i.test(line.trim()))
 const saysNone = (lines: string[]) => lines.some(line => /^none\.?$/i.test(line.trim()))
@@ -156,7 +163,7 @@ export function check(body: string, kind: Kind): Checked {
   if (failed > 0 && open.length === 0) errors.push('a criterion failed but no finding is open: add the open finding that fixes it')
   const verdict = kind === 'verify'
     ? (failed > 0 || open.length > 0 ? 'fail' : 'pass')
-    : open.some(finding => finding.group === 'Unambiguous fixes') ? 'fixes needed'
+    : open.some(finding => finding.group === 'Unambiguous fixes' && !needsNoCode(finding.text)) ? 'fixes needed'
     : open.length > 0 ? 'approver decisions'
     : 'clean'
   return { errors, verdict, failed, findings: found }

@@ -1,8 +1,7 @@
 # The factory's deterministic routing: each job runs one subcommand of scripts/factory/dispatch.ts.
 #   check          a ticket gets `queued`: post earlier context, then label factory-ready (Warp's trigger) or blocked
 #   landed         a pull request merges into epic/*: log its context-log block, close the ticket, re-check what it blocked,
-#                  and once the epic's last ticket closes, mark the epic pull request ready (or, when epic/<n> is behind
-#                  main, open a sync ticket first);
+#                  and once the epic's last ticket closes, mark the epic pull request ready;
 #                  into main: log its context-log block only (setup work and epic roll-ups)
 #   unblock        an issue closes: re-check the blocked issues it held back (for an epic, those waiting on any of its tickets)
 #   context-check  a pull request into epic/* or main opens or changes: its body needs one valid context-log block
@@ -79,8 +78,7 @@ jobs:
       group: factory-landed-${{ github.event.pull_request.number }}
     # Writes beyond the workflow default, for the epic pull request once its last ticket lands:
     # pull-requests to mark it ready for review, actions to dispatch ci.yml and factory.yml on the epic
-    # branch so its required checks run. Contents stays read-only: an epic branch that is behind main gets
-    # a sync ticket, because the epic/** ruleset rejects update-branch.
+    # branch so its required checks run. Contents stays read-only: nothing here writes to epic/<n>.
     permissions:
       issues: write
       contents: read

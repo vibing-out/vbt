@@ -27,13 +27,12 @@ function fakeGitHub(
   notice?: LabelNotice,
   epicPull: EpicPull | null = null,
   unlabeler: Actor | null = null,
-): GitHub & { calls: string[]; mergeableState: boolean | null; behind: number } {
+): GitHub & { calls: string[]; mergeableState: boolean | null } {
   const calls: string[] = []
   const byNumber = new Map(issues.map((i) => [i.number, i]))
   return {
     calls,
     mergeableState: true,
-    behind: 0,
     async issue(n) {
       const found = byNumber.get(n)
       if (!found) throw new Error(`no issue ${n}`)
@@ -80,9 +79,6 @@ function fakeGitHub(
     },
     async mergeable() {
       return this.mergeableState
-    },
-    async behindBy() {
-      return this.behind
     },
     async markReady(p) {
       calls.push(`ready #${p.number}`)
@@ -710,14 +706,15 @@ describe('epicReady from landed', () => {
   })
   it('logs a failure without failing landed, since the ticket has already merged', async () => {
     const { github, lines, deps } = setup('CLOSED', epicPull())
-    github.behindBy = async () => {
-      throw new Error('502 from GET compare: bad gateway')
+    github.dispatchWorkflow = async () => {
+      throw new Error('502 from POST dispatches: bad gateway')
     }
     await expect(landed(40, deps)).resolves.toBeUndefined()
+    // Not marked ready: its required checks never started.
     expect(github.calls).toEqual(['close #11', 'find epic pull for #2'])
-    expect(lines).toContain('epic #2: readiness step failed: 502 from GET compare: bad gateway')
+    expect(lines).toContain('epic #2: readiness step failed: 502 from POST dispatches: bad gateway')
   })
-  it('dispatches the checks on an epic branch that is current with main', async () => {
+  it('dispatches the checks and marks ready without touching the epic branch, even when it is behind main', async () => {
     const { github, deps } = setup('CLOSED', epicPull(), 'CLOSED')
     expect(await epicReady(2, deps)).toBe('ready')
     expect(github.calls.filter((c) => c.startsWith('dispatch'))).toEqual(['dispatch ci.yml on epic/2', 'dispatch factory.yml on epic/2 {"pr":"39"}'])
@@ -794,28 +791,6 @@ describe('sync tickets for an epic that conflicts with main', () => {
     expect(await epicReady(2, deps)).toBe('waiting')
     expect(github.calls).toEqual(['find epic pull for #2'])
     expect(lines).toContain('epic #2: GitHub has not computed whether #39 conflicts; the next landed or push to main re-checks')
-  })
-  it('opens a sync ticket when every ticket has merged but the epic branch is behind main, and marks nothing ready', async () => {
-    const { github, lines, deps } = setup([])
-    github.mergeableState = true
-    github.behind = 3
-    expect(await epicReady(2, deps)).toBe('behind')
-    expect(github.calls).toEqual([
-      'find epic pull for #2',
-      'create "T-00a Sync epic/2 with main" in #2: Every ticket in the epic has merged, but `epic/2` is behind `main`, and `main`\'s ruleset only merges an up-to-date branch. The `epic/**` ruleset rejects GitHub\'s update-branch ("Changes must be made through a pull request"), so the update comes through this ticket\'s pull request.',
-      'label #50 +queued',
-      'comment #39 This pull request is behind `main`. Opened #50 to merge `main` into `epic/2`.',
-      'context #50 ## Context from earlier tickets',
-      'label #50 +factory-ready',
-    ])
-    expect(lines).toContain('epic #2: #39 is behind main; opened sync ticket #50 (T-00a)')
-  })
-  it('opens no sync ticket for an epic that is only behind while tickets are still open', async () => {
-    const { github, deps } = setup()
-    github.mergeableState = true
-    github.behind = 3
-    expect(await epicReady(2, deps)).toBe('waiting')
-    expect(github.calls).toEqual(['find epic pull for #2'])
   })
   it('on a push to main, opens a sync ticket for a conflicting epic pull request', async () => {
     const { github, lines, deps } = setup()

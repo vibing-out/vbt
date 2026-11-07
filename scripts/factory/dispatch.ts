@@ -73,8 +73,6 @@ export interface GitHub {
   // Whether the pull request merges into its base without conflicts: false when it conflicts, null when
   // GitHub has not computed it yet (it does so lazily, after a push to either branch).
   mergeable(pull: EpicPull): Promise<boolean | null>
-  // How many commits `main` has that the pull request's branch lacks.
-  behindBy(pull: EpicPull): Promise<number>
   markReady(pull: EpicPull): Promise<void>
   // Starts a workflow_dispatch run of `.github/workflows/<file>` on `ref`. Dispatches made with GITHUB_TOKEN
   // still start runs, unlike pushes, so this is how the epic branch's required checks run on a head that
@@ -249,28 +247,20 @@ export const isSyncTicket = (title: string, epicNumber: number): boolean =>
 
 // What the sync ticket asks for. The procedure lives in the Foreman and Implement definitions; this is the
 // ticket's spec and acceptance criteria.
-export function syncBody(epicNumber: number, pull: EpicPull, reason: SyncReason): string {
+export function syncBody(epicNumber: number, pull: EpicPull): string {
   const branch = `sync/epic-${epicNumber}-main`
-  const why =
-    reason === 'conflict'
-      ? `\`main\` and \`epic/${epicNumber}\` both changed the same lines, so epic pull request #${pull.number} conflicts and cannot merge.`
-      : `Every ticket in the epic has merged, but \`epic/${epicNumber}\` is behind \`main\`, and \`main\`'s ruleset only merges an up-to-date branch. ` +
-        `The \`epic/**\` ruleset rejects GitHub's update-branch ("Changes must be made through a pull request"), so the update comes through this ticket's pull request.`
   return [
-    why,
+    `\`main\` and \`epic/${epicNumber}\` both changed the same lines, so epic pull request #${pull.number} conflicts and cannot merge.`,
     '',
-    `Cut \`${branch}\` from \`origin/epic/${epicNumber}\`, merge \`origin/main\` into it, resolve any conflict keeping both sides' intent, and open a pull request into \`epic/${epicNumber}\`.`,
+    `Cut \`${branch}\` from \`origin/epic/${epicNumber}\`, merge \`origin/main\` into it, resolve each conflict keeping both sides' intent, and open a pull request into \`epic/${epicNumber}\`.`,
     'It merges with a merge commit, never a squash: a squash drops main\'s history from the epic branch, and the same conflict comes back.',
     '',
     '## Acceptance criteria',
     `- The branch holds a merge commit of \`origin/main\` into \`origin/epic/${epicNumber}\` (\`git merge-base --is-ancestor origin/main HEAD\` passes).`,
     '- `pnpm lint`, `pnpm typecheck` and `pnpm test` pass on it.',
-    `- Once it merges, #${pull.number} is up to date with \`main\` and has no conflicts.`,
+    `- Once it merges, #${pull.number} no longer conflicts with \`main\`.`,
   ].join('\n')
 }
-
-// Why an epic needs a sync ticket: it conflicts with `main`, or it is ready but behind `main`.
-export type SyncReason = 'conflict' | 'behind'
 
 // The Slack post for an epic pull request that is ready for a person to approve into main.
 export function epicReadyMessage(pull: EpicPull, epicTitle: string): string {
@@ -421,37 +411,34 @@ export async function syncEpic(
     log(`epic #${epic.number}: GitHub has not computed whether #${pull.number} conflicts; the next landed or push to main re-checks`)
     return 'unknown'
   }
-  return openSync(epic, pull, 'conflict', deps)
+  return openSync(epic, pull, deps)
 }
 
-async function openSync(epic: Issue, pull: EpicPull, reason: SyncReason, deps: Deps): Promise<'in-flight' | 'opened'> {
+async function openSync(epic: Issue, pull: EpicPull, deps: Deps): Promise<'in-flight' | 'opened'> {
   const { github, log = console.log } = deps
-  const state = reason === 'conflict' ? 'conflicts with main' : 'is behind main'
   const inFlight = epic.subIssues.find((s) => s.state === 'OPEN' && isSyncTicket(s.title, epic.number))
   if (inFlight) {
-    log(`epic #${epic.number}: #${pull.number} ${state}; sync ticket #${inFlight.number} is already open`)
+    log(`epic #${epic.number}: #${pull.number} conflicts with main; sync ticket #${inFlight.number} is already open`)
     return 'in-flight'
   }
   const id = followupId('T-00', epic.subIssues.map((s) => s.title))
-  const created = await github.createSubIssue({ title: `${id} ${syncTitle(epic.number)}`, body: syncBody(epic.number, pull, reason), epic: epic.number })
+  const created = await github.createSubIssue({ title: `${id} ${syncTitle(epic.number)}`, body: syncBody(epic.number, pull), epic: epic.number })
   await github.addLabels(created, ['queued'])
-  await github.comment(pull.number, `This pull request ${state.replace('main', '`main`')}. Opened #${created} to merge \`main\` into \`epic/${epic.number}\`.`)
-  log(`epic #${epic.number}: #${pull.number} ${state}; opened sync ticket #${created} (${id})`)
+  await github.comment(pull.number, `This pull request conflicts with \`main\`. Opened #${created} to merge \`main\` into \`epic/${epic.number}\`.`)
+  log(`epic #${epic.number}: #${pull.number} conflicts with main; opened sync ticket #${created} (${id})`)
   await check(created, deps)
   return 'opened'
 }
 
-// Once every ticket in the epic is closed and the epic branch has all of `main` (whose ruleset only merges
-// an up-to-date branch), dispatches the epic pull request's required checks, marks it ready for review,
-// comments and posts to Slack. An epic branch that is behind gets a sync ticket instead, since the
-// `epic/**` ruleset rejects update-branch; the sync landing runs this again. First, at every landing, a
-// conflict with `main` opens a sync ticket (see syncEpic): the earlier the conflict is caught, the smaller it is. A pull request that is
+// Once every ticket in the epic is closed, dispatches the epic pull request's required checks, marks it
+// ready for review, comments and posts to Slack. First, at every landing, a conflict with `main` opens a sync ticket
+// (see syncEpic): the earlier the conflict is caught, the smaller it is. A pull request that is
 // already ready was handled by an earlier run, so nothing is repeated. Failures are logged, not thrown:
 // the ticket has already merged and closed, and a person can mark the pull request ready by hand.
 export async function epicReady(
   epicNumber: number,
   deps: Deps,
-): Promise<'conflict' | 'behind' | 'waiting' | 'no-pull' | 'already-ready' | 'ready' | 'failed'> {
+): Promise<'conflict' | 'waiting' | 'no-pull' | 'already-ready' | 'ready' | 'failed'> {
   const { github, log = console.log } = deps
   try {
     const epic = await github.issue(epicNumber)
@@ -470,12 +457,12 @@ export async function epicReady(
       log(`epic #${epicNumber}: pull request #${pull.number} is already ready for review`)
       return 'already-ready'
     }
-    if ((await github.behindBy(pull)) > 0) {
-      await openSync(epic, pull, 'behind', deps)
-      return 'behind'
-    }
+    // A branch that is only behind `main` is marked ready as is: `main`'s ruleset does not require an
+    // up-to-date branch (strict status checks are off), and the `epic/**` ruleset rejects update-branch.
+    // If strict is ever turned back on, open a sync ticket here when the branch is behind (compare
+    // `epic/<k>...main`), the way syncEpic does for a conflict.
     // The required checks `check` (ci.yml) and `context-check` (factory.yml) must pass on the head commit.
-    // A head that GITHUB_TOKEN merged (a sync or ticket pull request) started neither, so both are dispatched.
+    // A head that GITHUB_TOKEN merged (a ticket or sync pull request) started neither, so both are dispatched.
     await github.dispatchWorkflow('ci.yml', pull.head)
     await github.dispatchWorkflow('factory.yml', pull.head, { pr: String(pull.number) })
     await github.markReady(pull)
@@ -817,10 +804,6 @@ export function restGitHub(
         if (raw.mergeable !== null) return raw.mergeable
       }
       return null
-    },
-    async behindBy(pull) {
-      const compare = (await call('GET', `/repos/${owner}/${name}/compare/${encodeURIComponent(pull.head)}...main`)) as { ahead_by: number }
-      return compare.ahead_by
     },
     async markReady(pull) {
       const result = (await call('POST', '/graphql', {

@@ -6,8 +6,8 @@ import { expect, test } from "@playwright/test";
 // value; without it, that test is reported as skipped rather than passing silently.
 const hasProductDb = !!process.env.NEXT_PUBLIC_SUPABASE_URL && !!process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
-test("home page renders greeting, flag and context-log region @smoke", async ({ page }) => {
-  await page.goto("/");
+test("status page renders greeting, flag and context-log region @smoke", async ({ page }) => {
+  await page.goto("/status");
   await expect(page.getByRole("heading", { name: "VBT" })).toBeVisible();
   await expect(page.getByTestId("greeting")).toBeVisible();
 
@@ -21,7 +21,7 @@ test("home page renders greeting, flag and context-log region @smoke", async ({ 
 
 test("greeting is the product database value @smoke", async ({ page }) => {
   test.skip(!hasProductDb, "product DB env not set");
-  await page.goto("/");
+  await page.goto("/status");
   await expect(page.getByTestId("greeting")).toHaveText("Hello, VBT");
 });
 

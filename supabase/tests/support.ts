@@ -71,3 +71,37 @@ export function withClaims(claims: Record<string, unknown>): { sql: string; para
 
 export const PERMISSION_DENIED = /permission denied/;
 export const INSERT_ONLY = /is insert-only/;
+
+/**
+ * Runs `fn` inside a transaction that is always rolled back, as `role` (switch with `set local role`
+ * inside `fn` if needed). For tests that need intermediate results between statements.
+ */
+export async function inRolledBackTransaction<T>(client: pg.Client, role: Role, fn: () => Promise<T>): Promise<T> {
+  await client.query("begin");
+  try {
+    if (role !== "postgres") await client.query(`set local role ${role}`);
+    return await fn();
+  } finally {
+    await client.query("rollback");
+  }
+}
+
+/** Runs one statement under a savepoint, expects it to fail, and rolls back to the savepoint. */
+export async function expectStatementError(
+  client: pg.Client,
+  sql: string,
+  params: unknown[],
+  pattern: RegExp,
+): Promise<{ code?: string; message: string }> {
+  await client.query("savepoint expect_error");
+  try {
+    await client.query(sql, params);
+  } catch (error) {
+    await client.query("rollback to savepoint expect_error");
+    const { code, message } = error as { code?: string; message: string };
+    if (!pattern.test(`${code ?? ""} ${message}`)) throw new Error(`unexpected error ${code}: ${message}`);
+    return { code, message };
+  }
+  await client.query("rollback to savepoint expect_error");
+  throw new Error(`expected ${sql} to fail`);
+}

@@ -3,7 +3,16 @@ import { join, relative } from "node:path";
 import { expect, test } from "vitest";
 
 const root = join(import.meta.dirname, "..");
-const serverModules = ["lib/product-db.ts", "lib/context-log.ts", "lib/require-role.ts", "lib/factory-stats.ts"];
+const serverModules = [
+  "lib/product-db.ts",
+  "lib/context-log.ts",
+  "lib/require-role.ts",
+  "lib/service-db.ts",
+  "lib/election.ts",
+  "lib/ingest.ts",
+  "lib/batches.ts",
+  "lib/factory-stats.ts",
+];
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {

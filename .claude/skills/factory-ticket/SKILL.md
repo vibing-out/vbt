@@ -24,7 +24,7 @@ epic branch, and starting the next ticket. You only implement.
 
    If not, say which issue it waits on and stop. This mirrors the
    factory's `ticket-readiness` skill; change both together.
-3. **Branch** from the epic. The dispatcher already synced it with `main` when it marked the ticket ready, and pushing to `epic/*` is blocked:
+3. **Branch** from the epic. The epic branch was cut from `main` when its first ticket started, and work from another epic reaches it only through `main`, which is why cross-epic blockers wait for their epic to merge. Pushing to `epic/*` is blocked:
    ```
    git fetch origin && git switch -c task/T-NN-<slug> origin/epic/<k>
    ```

@@ -32,7 +32,7 @@ The context log is an insert-only table in the Supabase project `vbt-context-log
 
 ## Branches and merges
 
-- Each ticket's branch is `task/T-NN-short-name`, cut from its epic branch `origin/epic/<epic issue number>`. The dispatch script syncs the epic branch with `main` before it marks a ticket ready; agents can't push to `epic/*`.
+- Each ticket's branch is `task/T-NN-short-name`, cut from its epic branch `origin/epic/<epic issue number>`. The epic branch is cut from `main` when its first ticket starts. A blocker in another epic counts only once that epic has merged into `main`, so the dispatch script keeps the ticket `blocked` until then. Agents can't push to `epic/*`.
 - Never commit directly to `epic/*` or `main`. The rulesets block it.
 - Open the pull request into `epic/<k>`:
   - The title starts with the task ID.

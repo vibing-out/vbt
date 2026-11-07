@@ -20,3 +20,13 @@ export {
   transition,
   validateBatchTransition,
 } from "./transition.ts";
+
+export {
+  isOfficialRole,
+  OFFICIAL_ROLES,
+  type OfficialGrant,
+  type OfficialRole,
+  type OfficialTarget,
+  officialMayActOn,
+  toOfficialGrant,
+} from "./official.ts";

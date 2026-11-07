@@ -130,6 +130,8 @@ describeDb("resolution 1: public roles reach only the views in public, never the
         { name: "ballot_event_public", kind: "v" },
         { name: "ballot_public", kind: "v" },
         { name: "machines", kind: "r" },
+        // T-20: a signed-in official's own grant (RLS: own row, aal2 only); anon has no grant on it.
+        ...(role === "authenticated" ? [{ name: "official_roles", kind: "r" }] : []),
         { name: "precincts", kind: "r" },
         { name: "stage_records", kind: "r" },
       ]);

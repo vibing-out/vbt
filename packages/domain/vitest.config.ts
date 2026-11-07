@@ -5,9 +5,9 @@ export default defineConfig({
     include: ["src/**/*.test.ts"],
     coverage: {
       provider: "v8",
-      include: ["src/status.ts", "src/transition.ts"],
+      include: ["src/status.ts", "src/transition.ts", "src/official.ts"],
       reporter: ["text"],
-      // The transition rules are the source of truth for ballot status; every
+      // The transition rules and the official scope rule are the source of truth; every
       // branch must be exercised.
       thresholds: {
         branches: 100,

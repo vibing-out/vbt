@@ -4,7 +4,7 @@ import { migrationFiles } from "../lib/db.ts";
 import { asRole, asRoleSteps, describeDb, useScratchDatabase } from "./support.ts";
 
 // ballots and ballot_events live in private, out of the Data API's reach (resolution 1).
-const PUBLIC_TABLES = ["app_info", "batches", "machines", "precincts", "stage_records"];
+const PUBLIC_TABLES = ["app_info", "batches", "machines", "official_roles", "precincts", "stage_records"];
 const PRIVATE_TABLES = ["ballot_events", "ballots"];
 const TABLES = [...PUBLIC_TABLES.map((t) => `public.${t}`), ...PRIVATE_TABLES.map((t) => `private.${t}`)].sort();
 
@@ -147,6 +147,16 @@ describeDb("no column stores voter identity", () => {
         "tracking_code",
       ],
     );
+  });
+
+  // T-20: officials' sign-in grants hold an auth user id, a role and a scope; never a name or email.
+  // Voters have no accounts, so no row here is a voter.
+  test("official_roles holds exactly user_id, role, scope, scope_id and created_at", async () => {
+    const { rows } = await db().query<{ column_name: string }>(
+      `select column_name from information_schema.columns
+       where table_schema = 'public' and table_name = 'official_roles' order by 1`,
+    );
+    expect(rows.map((r) => r.column_name)).toEqual(["created_at", "role", "scope", "scope_id", "user_id"]);
   });
 
   test("the deny-list catches identity columns", () => {

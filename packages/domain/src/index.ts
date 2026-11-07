@@ -46,4 +46,13 @@ export {
   summarizeChoices,
 } from "./manifest.ts";
 
-export { FALLBACK_RANK, orderByChain, type PublicEvent } from "./timeline.ts";
+export {
+  buildTrackTimeline,
+  FALLBACK_RANK,
+  orderByChain,
+  publicReason,
+  type PublicEvent,
+  sortStageRecords,
+  stageOrder,
+  type TrackTimelineEntry,
+} from "./timeline.ts";

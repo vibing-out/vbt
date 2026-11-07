@@ -3,7 +3,8 @@
 // timestamp, so nothing here reveals order across ballots (locked principle 5). No hashing happens
 // here: verifying the chain belongs to packages/events and the verifier (T-15).
 
-import { type BallotStatus, isBallotStatus } from "./status.ts";
+import { type BallotStatus, isBallotStatus, publicLabel } from "./status.ts";
+import { PUBLISHED_STAGES } from "./transition.ts";
 
 /** One public ballot event, as the tracker reads it from ballot_event_public. */
 export interface PublicEvent {
@@ -33,6 +34,73 @@ export const FALLBACK_RANK: Readonly<Record<BallotStatus, number>> = Object.free
 function eventRank(event: PublicEvent): number {
   if (event.event_type === "CAST") return -1;
   return isBallotStatus(event.to_status) ? FALLBACK_RANK[event.to_status] : 99;
+}
+
+/** One row of a ballot's public timeline. */
+export interface TrackTimelineEntry {
+  status: BallotStatus;
+  label: string;
+  /** A "YYYY-MM-DD" date, or null. Never a time of day. */
+  date: string | null;
+  /** Shown only for CHALLENGED and DISCARDED; see publicReason. */
+  reason: string | null;
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function isDay(value: unknown): value is string {
+  return typeof value === "string" && ISO_DATE.test(value);
+}
+
+/**
+ * The reason a voter may see. Only a challenge or a discard discloses its reason, and a blank one
+ * shows as none. Every other status shows no reason.
+ */
+export function publicReason(status: BallotStatus, reason: string | null): string | null {
+  return status === "CHALLENGED" || status === "DISCARDED" ? reason?.trim() || null : null;
+}
+
+/** The rank of a published stage in the tracker's stage list; unpublished stages sort last. */
+export function stageOrder(stage: BallotStatus): number {
+  const index = PUBLISHED_STAGES.indexOf(stage);
+  return index === -1 ? 99 : index;
+}
+
+/**
+ * Sorts stage records by stage order, then publication date. Never by time of day. Returns a new
+ * array.
+ */
+export function sortStageRecords<T extends { stage: BallotStatus; publishedOn: string | null }>(
+  records: readonly T[],
+): T[] {
+  return [...records].sort(
+    (a, b) => stageOrder(a.stage) - stageOrder(b.stage) || (a.publishedOn ?? "").localeCompare(b.publishedOn ?? ""),
+  );
+}
+
+/**
+ * A ballot's public timeline: the CAST entry, then each event that moved the ballot to a status, in
+ * chain order. The CAST date is the cast date when known, else the CAST event's date.
+ */
+export function buildTrackTimeline(events: readonly PublicEvent[], castDate: string | null): TrackTimelineEntry[] {
+  const { events: ordered } = orderByChain(events);
+
+  const entry = (status: BallotStatus, date: string | null, reason: string | null): TrackTimelineEntry => ({
+    status,
+    label: publicLabel(status),
+    date: isDay(date) ? date : null,
+    reason: publicReason(status, reason),
+  });
+
+  const castEvent = ordered.find((e) => e.event_type === "CAST");
+  const timeline: TrackTimelineEntry[] = [entry("CAST", castDate ?? castEvent?.occurred_on ?? null, null)];
+  for (const e of ordered) {
+    // CAST is the entry above. A MISMATCH_DETECTED flag with no status shows only through the
+    // CHALLENGED transition it creates.
+    if (e.event_type === "CAST" || !isBallotStatus(e.to_status) || e.to_status === "CAST") continue;
+    timeline.push(entry(e.to_status, e.occurred_on, e.reason));
+  }
+  return timeline;
 }
 
 /** The events in chain order; state-machine order if the chain is broken. */

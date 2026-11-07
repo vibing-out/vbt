@@ -9,16 +9,17 @@ import "server-only";
 // Never logs the code.
 import {
   type BallotStatus,
+  buildTrackTimeline,
   isBallotStatus,
   isTerminal,
-  orderByChain,
   PUBLISHED_STAGES,
   type PublicEvent,
   publicLabel,
+  sortStageRecords,
 } from "@vbt/domain";
 import { isIsoDate, toIndianaDate } from "./dates";
 import { defaultIntegrity, type IntegrityChecker, type RecordReader, safeCheck, type StageRecordRef } from "./integrity";
-import type { TrackResult, TrackStage, TrackTimelineEntry } from "./types";
+import type { TrackResult, TrackStage } from "./types";
 
 export interface LookupDeps {
   env?: Readonly<Record<string, string | undefined>>;
@@ -26,8 +27,6 @@ export interface LookupDeps {
   checker?: IntegrityChecker;
   records?: RecordReader;
 }
-
-const STAGE_RANK = new Map(PUBLISHED_STAGES.map((s, i) => [s, i]));
 
 class LookupFailed extends Error {}
 
@@ -84,7 +83,7 @@ export async function lookupBallot(code: string, deps: LookupDeps = {}): Promise
     const precinct = { id: precinctId, name: str(precinctRow!.name) ?? precinctId, countyId };
 
     const castDate = isIsoDate(ballot.cast_date) ? ballot.cast_date : null;
-    const timeline = buildTimeline(eventRows, castDate);
+    const timeline = buildTrackTimeline(eventRows.map(toPublicEvent), castDate);
 
     const reached = PUBLISHED_STAGES.filter((stage) => timeline.some((entry) => entry.status === stage));
     const stages = reached.length === 0 ? [] : await readStages(read, reached, precinct, checker, records, code, ciphertextHash);
@@ -105,9 +104,9 @@ export async function lookupBallot(code: string, deps: LookupDeps = {}): Promise
   }
 }
 
-/** Timeline entries: the CAST entry, then each event that moved the ballot to a status, in chain order. */
-function buildTimeline(rows: readonly Record<string, unknown>[], castDate: string | null): TrackTimelineEntry[] {
-  const events: PublicEvent[] = rows.map((r) => ({
+/** Parses one ballot_event_public row. Missing text fields become empty or null. */
+function toPublicEvent(r: Record<string, unknown>): PublicEvent {
+  return {
     event_type: str(r.event_type) ?? "",
     from_status: str(r.from_status),
     to_status: str(r.to_status),
@@ -115,25 +114,7 @@ function buildTimeline(rows: readonly Record<string, unknown>[], castDate: strin
     occurred_on: str(r.occurred_on),
     prev_hash: str(r.prev_hash),
     hash: str(r.hash) ?? "",
-  }));
-  const { events: ordered } = orderByChain(events);
-
-  const entry = (status: BallotStatus, date: string | null, reason: string | null): TrackTimelineEntry => ({
-    status,
-    label: publicLabel(status),
-    date: isIsoDate(date) ? date : null,
-    reason: status === "CHALLENGED" || status === "DISCARDED" ? (reason?.trim() || null) : null,
-  });
-
-  const castEvent = ordered.find((e) => e.event_type === "CAST");
-  const timeline: TrackTimelineEntry[] = [entry("CAST", castDate ?? castEvent?.occurred_on ?? null, null)];
-  for (const e of ordered) {
-    // CAST is the entry above. A MISMATCH_DETECTED flag with no status shows only through the
-    // CHALLENGED transition it creates.
-    if (e.event_type === "CAST" || !isBallotStatus(e.to_status) || e.to_status === "CAST") continue;
-    timeline.push(entry(e.to_status, e.occurred_on, e.reason));
-  }
-  return timeline;
+  };
 }
 
 async function readStages(
@@ -163,14 +144,8 @@ async function readStages(
     if (!ours) continue;
     refs.push({ stage, scope, scopeId, merkleRoot, signature: str(r.signature), publishedOn: toIndianaDate(r.published_at) });
   }
-  // Stage order, then publication date. Never by time of day.
-  refs.sort(
-    (a, b) =>
-      STAGE_RANK.get(a.stage)! - STAGE_RANK.get(b.stage)! || (a.publishedOn ?? "").localeCompare(b.publishedOn ?? ""),
-  );
-
   return Promise.all(
-    refs.map(async (record) => ({
+    sortStageRecords(refs).map(async (record) => ({
       ...record,
       recordUrl: records.recordUrl(record),
       check: await safeCheck(checker, { trackingCode, ciphertextHash, record }),

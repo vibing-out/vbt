@@ -29,7 +29,6 @@ const OUTBOUND_ALLOWLIST: Record<string, string> = {
   "apps/web/app/official/upload/upload-form.tsx": "same origin: POST /api/events (T-09)",
   "apps/web/app/track/tracker.tsx": "same origin: GET /api/track/:code for the voter's tracker",
   "supabase/scripts/seed-demo-officials.ts": "our own Supabase: creates the demo officials (run by a human)",
-  "tools/verifier/src/cli.ts": "public verifier: read-only download of the published record from the --base-url a citizen gives",
 };
 
 const files = listSourceFiles(REPO, SCANNED_ROOTS);

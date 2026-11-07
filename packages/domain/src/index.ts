@@ -64,6 +64,8 @@ export {
   totalsEqual,
 } from "./crosscheck.ts";
 
+export { stageMemberEventTypes } from "./stage-members.ts";
+
 export {
   buildTrackTimeline,
   FALLBACK_RANK,

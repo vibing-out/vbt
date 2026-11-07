@@ -216,6 +216,37 @@ test("AC1: a published county record lists only the ballots that moved into that
   expect((body.ballots as Row[]).map((b) => b.tracking_code).sort()).toEqual(["CODE-0001", "CODE-0002", "CODE-0003"]);
 });
 
+test("AC1: a published CHALLENGED record returns 200, counting ballots moved by MISMATCH_DETECTED", async () => {
+  const tables = seeded();
+  // Ballot 4 was challenged by an official's batch (MISMATCH_DETECTED -> CHALLENGED, in seeded()).
+  // Ballot 5 was challenged at ingest: a status-less MISMATCH_DETECTED flag, then STATUS_CHANGE -> CHALLENGED.
+  const b5 = tables.ballot_public.find((b) => b.tracking_code === "CODE-0005") as ReturnType<typeof ballot>;
+  tables.ballot_event_public.push(
+    { ...event(b5, "CHALLENGED", "18097", "MISMATCH_DETECTED"), id: `e-${b5.id}-flag`, to_status: null },
+    event(b5, "CHALLENGED"),
+  );
+  tables.stage_records.push(record("county", "18097", "CHALLENGED", 2));
+  serveDb(tables);
+  const response = await call("18097", "CHALLENGED");
+  expect(response.status).toBe(200);
+  const body = (await response.json()) as Row;
+  expectVerifierShape(body);
+  expect(body).toMatchObject({ scope: "county", scope_id: "18097", stage: "CHALLENGED", ballot_count: 2 });
+  expect((body.ballots as Row[]).map((b) => b.tracking_code).sort()).toEqual(["CODE-0004", "CODE-0005"]);
+});
+
+test("AC1: a MISMATCH_DETECTED event never counts toward a batch stage's record", async () => {
+  const tables = seeded();
+  // A stray MISMATCH_DETECTED into TALLIED_PRECINCT would make precinct 2's list 3, not 2, if it counted.
+  const extra = ballot(9, "18097-002");
+  tables.ballot_public.push(extra);
+  tables.ballot_event_public.push(event(extra, "TALLIED_PRECINCT", "18097", "MISMATCH_DETECTED"));
+  serveDb(tables);
+  const response = await call("18097-002", "TALLIED_PRECINCT");
+  expect(response.status).toBe(200);
+  expect(((await response.json()) as Row).ballot_count).toBe(2);
+});
+
 test("AC1: ballots are in ciphertext-hash order, never cast order, and a large record is read a page at a time", async () => {
   const count = PAGE_SIZE + 5;
   const ballots = Array.from({ length: count }, (_, i) => ballot(i + 1, "18097-001"));

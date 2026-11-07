@@ -13,10 +13,12 @@ import "server-only";
 //
 // Which ballots a record lists. stage_records.id is the batch id, and each ballot's STATUS_CHANGE event
 // into the stage carries that batch_id, but batch_id is private. Until the database offers a public
-// read of a record's members, membership is taken from the public events: the ballots with a
-// STATUS_CHANGE into the stage within the record's precinct or county. That is exact while a scope
+// read of a record's members, membership is taken from the public events: the ballots with an event
+// into the stage within the record's precinct or county, where @vbt/domain's stageMemberEventTypes says
+// which event types count (STATUS_CHANGE; for CHALLENGED also MISMATCH_DETECTED). That is exact while a scope
 // has one record per stage. When it is not (more than one record, or a count that disagrees with
 // ballot_count) the route answers 503 rather than serve a list that might not be the record's.
+import { stageMemberEventTypes } from "@vbt/domain";
 import { decodeStandardBase64, sortStageLeaves } from "@vbt/events";
 
 /** The published stages and the scope each is batched per (locked-interfaces § Public JSON shapes). */
@@ -260,9 +262,12 @@ export function postgrestRecordSource(
   /** The ballots that moved into `stage` within the scope, as {tracking_code, ciphertext_hash}, leaf order. */
   async function readMembers(scope: RecordScope, scopeId: string, stage: RecordStage): Promise<PublishedBallot[]> {
     const scopeColumn = scope === "precinct" ? "precinct_id" : "county_id";
+    // Which event types count as a move into the stage is a domain rule (@vbt/domain stageMemberEventTypes).
+    const memberTypes = stageMemberEventTypes(stage);
+    if (memberTypes.length === 0) throw new RecordUnavailable("stage has no member events");
     const events = await readAll(
       `ballot_event_public?select=ballot_id` +
-        `&event_type=eq.STATUS_CHANGE&to_status=${eq(stage)}&${scopeColumn}=${eq(scopeId)}` +
+        `&event_type=in.${inList(memberTypes)}&to_status=${eq(stage)}&${scopeColumn}=${eq(scopeId)}` +
         `&order=hash.asc,id.asc`,
     );
     const memberIds = new Set<string>();

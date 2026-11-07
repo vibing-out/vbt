@@ -35,6 +35,6 @@ test("client bundle holds nothing from the server-only database modules @smoke",
   expect(files.length).toBeGreaterThan(0);
   for (const f of files) {
     const source = readFileSync(join(f.parentPath, f.name), "utf8");
-    expect(source, f.name).not.toMatch(/CONTEXT_|search_context|grant_type=password|app_info|official_roles/);
+    expect(source, f.name).not.toMatch(/CONTEXT_|search_context|grant_type=password|app_info|official_roles|ballot_public|ballot_event_public|stage_records/);
   }
 });

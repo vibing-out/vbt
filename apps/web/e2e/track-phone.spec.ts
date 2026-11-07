@@ -24,9 +24,8 @@ test("all four demo codes show a result with no time of day and no sideways scro
   expect(codes).toHaveLength(4);
   for (const code of codes) {
     await page.goto(`/track/${code}`);
-    await expect(page.getByTestId("track-result")).toBeVisible();
-    await expect(page.getByTestId("status")).not.toBeEmpty();
-    await expect(page.getByTestId("next-step")).not.toBeEmpty();
+    await expect(page.getByTestId("current-status")).not.toBeEmpty();
+    await expect(page.getByTestId("timeline-entry").first()).toBeVisible();
     await expect(page.getByRole("link", { name: "View the paper receipt" })).toBeVisible();
     await expect(page.locator("body")).not.toContainText(NO_TIME_OF_DAY);
     await expectNoHorizontalScroll(page);
@@ -37,7 +36,7 @@ test("the receipt shows the code and a QR code, and no time of day @smoke", asyn
   const [code] = await demoCodes(page);
   await page.goto(`/track/${code}`);
   await page.getByRole("link", { name: "View the paper receipt" }).click();
-  await expect(page).toHaveURL(new RegExp(`/track/${code}/receipt$`));
+  await expect(page).toHaveURL(new RegExp(`/receipt/${code}$`));
   await expect(page.getByRole("heading", { name: "Your paper receipt" })).toBeVisible();
   await expect(page.getByTestId("receipt-qr").locator("svg")).toBeVisible();
   await expect(page.locator("body")).toContainText(code!);
@@ -49,8 +48,9 @@ test("the receipt shows the code and a QR code, and no time of day @smoke", asyn
 
 test("an unknown code and its receipt show a generic message @smoke", async ({ page }) => {
   await page.goto("/track/NOT-A-REAL-CODE");
-  await expect(page.getByTestId("track-unknown")).toContainText("We couldn't find that code");
+  await expect(page.getByTestId("not-found")).toContainText("We couldn't find a ballot with that code");
   await expectNoHorizontalScroll(page);
+  // The old receipt address redirects to /receipt/{code}.
   await page.goto("/track/NOT-A-REAL-CODE/receipt");
   await expect(page.getByText("We couldn't find that code")).toBeVisible();
 });

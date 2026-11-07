@@ -40,9 +40,11 @@ test("client bundle holds nothing from the server-only modules or the Flags secr
   expect(files.length).toBeGreaterThan(0);
   const secrets = [process.env.FLAGS_SECRET, process.env.FLAGS].filter((v): v is string => !!v);
   expect(secrets.length, "FLAGS_SECRET is set for a local run").toBeGreaterThan(0);
+  // The official login form ships the Supabase browser client, whose signInWithPassword posts to
+  // `${url}/token?grant_type=password`; only the context log's own `/auth/v1/token?grant_type=password` call is server-only.
   for (const f of files) {
     const source = readFileSync(join(f.parentPath, f.name), "utf8");
-    expect(source, f.name).not.toMatch(/CONTEXT_|search_context|grant_type=password|app_info|official_roles/);
+    expect(source, f.name).not.toMatch(/CONTEXT_|search_context|auth\/v1\/token\?grant_type=password|app_info|official_roles|ballot_public|ballot_event_public|stage_records/);
     // A boolean, not toContain, so a failure never prints the secret.
     for (const secret of secrets) expect(source.includes(secret), `${f.name} holds a Flags secret`).toBe(false);
   }

@@ -1,0 +1,201 @@
+{
+  "ElectionEventLog": {
+    "GeneratedTime": "2026-11-04T02:00:00.000Z",
+    "Device": [
+      {
+        "Type": "scan-single",
+        "Id": "M-18097-001-A",
+        "Version": "vbt-sim-1.0.0",
+        "Event": [
+          {
+            "Id": "polls-opened",
+            "Type": "user-action",
+            "Disposition": "success",
+            "Sequence": 0,
+            "TimeStamp": "2026-11-03T06:00:00.000Z",
+            "UserId": "poll_worker",
+            "Description": "Polls opened."
+          },
+          {
+            "Id": "vote-cast",
+            "Type": "device-event",
+            "Disposition": "success",
+            "Sequence": 1,
+            "TimeStamp": "2026-11-03T06:00:01.000Z",
+            "UserId": "machine",
+            "Description": "Ballot cast.",
+            "Details": "{\"ballotId\":\"sim-M-18097-001-A-0001\"}"
+          },
+          {
+            "Id": "vote-cast",
+            "Type": "device-event",
+            "Disposition": "success",
+            "Sequence": 2,
+            "TimeStamp": "2026-11-03T06:00:02.000Z",
+            "UserId": "machine",
+            "Description": "Ballot cast.",
+            "Details": "{\"ballotId\":\"sim-M-18097-001-A-0002\"}"
+          },
+          {
+            "Id": "vote-cast",
+            "Type": "device-event",
+            "Disposition": "success",
+            "Sequence": 3,
+            "TimeStamp": "2026-11-03T06:00:03.000Z",
+            "UserId": "machine",
+            "Description": "Ballot cast.",
+            "Details": "{\"ballotId\":\"sim-M-18097-001-A-0003\"}"
+          },
+          {
+            "Id": "vote-cast",
+            "Type": "device-event",
+            "Disposition": "success",
+            "Sequence": 4,
+            "TimeStamp": "2026-11-03T06:00:04.000Z",
+            "UserId": "machine",
+            "Description": "Ballot cast.",
+            "Details": "{\"ballotId\":\"sim-M-18097-001-A-0004\"}"
+          },
+          {
+            "Id": "vote-cast",
+            "Type": "device-event",
+            "Disposition": "success",
+            "Sequence": 5,
+            "TimeStamp": "2026-11-03T06:00:05.000Z",
+            "UserId": "machine",
+            "Description": "Ballot cast.",
+            "Details": "{\"ballotId\":\"sim-M-18097-001-A-0005\"}"
+          },
+          {
+            "Id": "vote-cast",
+            "Type": "device-event",
+            "Disposition": "success",
+            "Sequence": 6,
+            "TimeStamp": "2026-11-03T06:00:06.000Z",
+            "UserId": "machine",
+            "Description": "Ballot cast.",
+            "Details": "{\"ballotId\":\"sim-M-18097-001-A-0006\"}"
+          },
+          {
+            "Id": "vote-cast",
+            "Type": "device-event",
+            "Disposition": "success",
+            "Sequence": 7,
+            "TimeStamp": "2026-11-03T06:00:07.000Z",
+            "UserId": "machine",
+            "Description": "Ballot cast.",
+            "Details": "{\"ballotId\":\"sim-M-18097-001-A-0007\"}"
+          },
+          {
+            "Id": "vote-cast",
+            "Type": "device-event",
+            "Disposition": "success",
+            "Sequence": 8,
+            "TimeStamp": "2026-11-03T06:00:08.000Z",
+            "UserId": "machine",
+            "Description": "Ballot cast.",
+            "Details": "{\"ballotId\":\"sim-M-18097-001-A-0008\"}"
+          },
+          {
+            "Id": "vote-cast",
+            "Type": "device-event",
+            "Disposition": "success",
+            "Sequence": 9,
+            "TimeStamp": "2026-11-03T06:00:09.000Z",
+            "UserId": "machine",
+            "Description": "Ballot cast.",
+            "Details": "{\"ballotId\":\"sim-M-18097-001-A-0009\"}"
+          },
+          {
+            "Id": "vote-cast",
+            "Type": "device-event",
+            "Disposition": "success",
+            "Sequence": 10,
+            "TimeStamp": "2026-11-03T06:00:10.000Z",
+            "UserId": "machine",
+            "Description": "Ballot cast.",
+            "Details": "{\"ballotId\":\"sim-M-18097-001-A-0010\"}"
+          },
+          {
+            "Id": "vote-cast",
+            "Type": "device-event",
+            "Disposition": "success",
+            "Sequence": 11,
+            "TimeStamp": "2026-11-03T06:00:11.000Z",
+            "UserId": "machine",
+            "Description": "Ballot cast.",
+            "Details": "{\"ballotId\":\"sim-M-18097-001-A-0011\"}"
+          },
+          {
+            "Id": "vote-cast",
+            "Type": "device-event",
+            "Disposition": "success",
+            "Sequence": 12,
+            "TimeStamp": "2026-11-03T06:00:12.000Z",
+            "UserId": "machine",
+            "Description": "Ballot cast.",
+            "Details": "{\"ballotId\":\"sim-M-18097-001-A-0012\"}"
+          },
+          {
+            "Id": "vote-cast",
+            "Type": "device-event",
+            "Disposition": "success",
+            "Sequence": 13,
+            "TimeStamp": "2026-11-03T06:00:13.000Z",
+            "UserId": "machine",
+            "Description": "Ballot cast.",
+            "Details": "{\"ballotId\":\"sim-M-18097-001-A-0013\"}"
+          },
+          {
+            "Id": "vote-cast",
+            "Type": "device-event",
+            "Disposition": "success",
+            "Sequence": 14,
+            "TimeStamp": "2026-11-03T06:00:14.000Z",
+            "UserId": "machine",
+            "Description": "Ballot cast.",
+            "Details": "{\"ballotId\":\"sim-M-18097-001-A-0014\"}"
+          },
+          {
+            "Id": "vote-cast",
+            "Type": "device-event",
+            "Disposition": "success",
+            "Sequence": 15,
+            "TimeStamp": "2026-11-03T06:00:15.000Z",
+            "UserId": "machine",
+            "Description": "Ballot cast.",
+            "Details": "{\"ballotId\":\"sim-M-18097-001-A-0015\"}"
+          },
+          {
+            "Id": "vote-cast",
+            "Type": "device-event",
+            "Disposition": "success",
+            "Sequence": 16,
+            "TimeStamp": "2026-11-03T06:00:16.000Z",
+            "UserId": "machine",
+            "Description": "Ballot cast.",
+            "Details": "{\"ballotId\":\"sim-M-18097-001-A-0016\"}"
+          },
+          {
+            "Id": "export-cast-vote-record-complete",
+            "Type": "user-action",
+            "Disposition": "success",
+            "Sequence": 17,
+            "TimeStamp": "2026-11-03T06:00:17.000Z",
+            "UserId": "poll_worker",
+            "Description": "Cast vote record export complete."
+          },
+          {
+            "Id": "polls-closed",
+            "Type": "user-action",
+            "Disposition": "success",
+            "Sequence": 18,
+            "TimeStamp": "2026-11-03T06:00:18.000Z",
+            "UserId": "poll_worker",
+            "Description": "Polls closed."
+          }
+        ]
+      }
+    ]
+  }
+}

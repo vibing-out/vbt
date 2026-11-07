@@ -1,0 +1,38 @@
+{
+  "scope": "county-certified",
+  "scopeId": "18097",
+  "electionId": "marion-general-2026-11-03",
+  "ballotCount": 34,
+  "contests": [
+    {
+      "contestId": "contest-president",
+      "selections": [
+        {
+          "selectionId": "cand-a",
+          "votes": 12
+        },
+        {
+          "selectionId": "cand-b",
+          "votes": 12
+        },
+        {
+          "selectionId": "cand-c",
+          "votes": 10
+        }
+      ]
+    },
+    {
+      "contestId": "contest-measure-1",
+      "selections": [
+        {
+          "selectionId": "yes",
+          "votes": 18
+        },
+        {
+          "selectionId": "no",
+          "votes": 16
+        }
+      ]
+    }
+  ]
+}

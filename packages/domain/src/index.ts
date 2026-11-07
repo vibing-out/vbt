@@ -44,3 +44,21 @@ export {
   type Selection,
   summarizeChoices,
 } from "./manifest.ts";
+
+export {
+  type BatchPlan,
+  type BatchPlanInput,
+  type CertificationInput,
+  checkCertification,
+  checkMachineCounts,
+  CROSS_CHECKS,
+  type CrossCheckId,
+  type CrossCheckResult,
+  mismatchReason,
+  planBatch,
+  type PlannedBallot,
+  subtractTotals,
+  sumTotals,
+  type Totals,
+  totalsEqual,
+} from "./crosscheck.ts";

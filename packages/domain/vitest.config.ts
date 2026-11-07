@@ -13,6 +13,7 @@ export default defineConfig({
         "src/crosscheck.ts",
         "src/cross-checks.ts",
         "src/timeline.ts",
+        "src/stage-members.ts",
       ],
       reporter: ["text"],
       // The transition rules, the official scope rule, the ballot choice rules and the cross-checks are the source of truth; every

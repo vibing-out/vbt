@@ -1,55 +1,56 @@
-# VBT brand brief (draft for the 9:15 design-direction session)
+# Brand brief
 
-Status: draft from Austin's prep, 2026-11-06. The full draft design system lives at https://claude.ai/artifact/L4tnVcq8gNNjXj8DhYSWdK (tokens, README, six component previews). This file is the short version for the review.
+## The product in one line
 
-## Direction
+VBT lets anyone follow a ballot from cast to certified, with proof at every stage, without ever revealing who cast it or how it was voted.
 
-VBT should feel like the best modern apps people already use, not like a government website. We are showing elections what a great product experience looks like. It is also a utility: a voter enters a code and gets an answer; an official runs a batch and confirms it.
+## Who uses it
 
-- **Voter tracker:** the current status is the first thing on screen, above any explanation. One task per screen.
-- **Every state says what happens next and roughly when** (for example, "Counties certify up to about 2 weeks after Election Day").
-- **Admin:** dense tables, batch actions with a confirmation step, filters that persist.
-- **Design the unhappy states too:** loading, code not found, challenged, discarded, offline.
-- **Motion only to confirm a state change** (a stage turning complete), 150–250 ms.
+| Who | Where they are | What they need |
+| --- | --- | --- |
+| A voter | On a phone, minutes after voting or weeks later, holding a paper slip | One answer: where is my ballot, and is it intact? |
+| A curious citizen or reporter | On a laptop, skeptical | To check any code and download the record to verify it themselves |
+| A poll worker | At a precinct on election night, tired, under time pressure | To move a whole precinct forward in one confident action |
+| A county official | At a desk, accountable for every change | Dense views, reasons on every exception, nothing irreversible by accident |
 
-## Approach
+## How it should feel
 
-Proven base, our own identity: shadcn/ui components for behavior and accessibility, restyled entirely by our tokens, plus six VBT components we own (StageTimeline, StatusBadge, CodeEntry, Receipt, IntegrityCheck, BatchActionBar).
+A best-in-class modern utility: the calm confidence of a good banking or shipment-tracking app. Quick to answer, generous with space for voters, precise and dense for officials. Proof is available in one tap but never pushed at someone who just wants the status.
 
-Decided 2026-11-06: shadcn/ui, not HeroUI v3 or Geist. HeroUI covers the same standard parts with nicer defaults, but shadcn puts the code in our repo for agents to edit and needs no extra factory setup. Don't mix libraries.
+Three words: **calm, exact, open.**
 
-Storyboard of both journeys (10 screens): https://claude.ai/artifact/KjRXemXy7SBcEfk4TzDbFC
+- **Calm.** Status first, plain words, one task per screen. A worried voter should feel settled within two seconds.
+- **Exact.** Every claim is specific: which stage, which county, which date, which record. No vague reassurance.
+- **Open.** The proof is always one step away and anyone can check it. We show our work.
 
-## Palette (from the pitch deck, contrast-checked)
+## What it must never feel like
 
-| Token | Light | Dark | Use |
-| --- | --- | --- | --- |
-| `ink` | `#14213D` | `#EEF1F6` | Text |
-| `surface` | `#F6F4EE` | `#0F1626` | Page |
-| `surface-raised` | `#FFFDF8` | `#17213A` | Cards, receipt |
-| `brand-orange` | `#E07A2E` | `#F08A3E` | Primary button fill (navy text) and brand blocks |
-| `accent-mark` | `#CC6A22` | `#F08A3E` | Current-stage dot (the deck orange is too light for a small mark: 2.73:1) |
-| `accent-text` | `#A84A14` | `#F5A15F` | Orange text |
-| `stage-done` | `#C9D3E3` | `#2A3A5C` | Completed stages |
+- **A government website.** No GOV.UK, USWDS or Login.gov patterns, no Public Sans, no seal-and-banner header, no wall of links. VBT will run on a county's domain one day, but it should feel like a product people choose.
+- **Data journalism.** No election-night maps, horse-race charts or vote shares in the voter view. A ballot tracker shows a ballot's journey, not results.
+- **A crypto product.** No neon, no hex dumps up front, no "blockchain". Hashes live behind "See the proof".
+- **Alarming.** Challenged and discarded states are calm, specific and give the reason and the next step.
 
-Every text pair meets WCAG AA (4.5:1) and every meaningful mark 3:1, in both themes; checked 2026-11-06.
+## Visual identity
 
-## Type
+| Element | Decision |
+| --- | --- |
+| Color | Navy `#14213D` for ink and dark surfaces, warm paper `#F6F4EE` for the page, orange `#E07A2E` as the one accent |
+| Type | Instrument Sans for everything; JetBrains Mono for tracking codes and hashes so 0/O and 1/l/I never get confused |
+| Base library | shadcn/ui, restyled entirely through our tokens |
+| Surfaces | Soft elevated cards with no hard borders; one dark navy hero card per screen at most |
+| Signature | The stage timeline: four dots on a line, the current stage in orange |
+| Receipt | A wallet-style pass on screen; a plain, high-contrast slip on paper |
+| Badges | A colored dot plus the word, never color alone |
+| Admin batch actions | A floating dark pill that appears when rows are selected |
 
-- **Instrument Sans** for all interface text: a contemporary grotesque that reads as a modern product. Public Sans was dropped because it is the U.S. government's own typeface.
-- **JetBrains Mono** for tracking codes and hashes, so 0/O and 1/l/I look different.
-- Libre Baskerville stays in the pitch deck only.
+## Voice
 
-## Signature motif
+Plain, warm and specific. We write like a helpful clerk who knows the process cold.
 
-The stage timeline (four dots on a line, current stage in orange) appears on the receipt, the voter tracker and the admin batch view.
+- Say what happened, to whom, and when: "Marion County included your ballot in its election-night results on Nov 3."
+- Name the next step and when to expect it: "Certification is usually within two weeks."
+- Never promise more than the system proves: "Your encrypted ballot is unchanged," not "Your vote is safe."
 
-## Inspiration
+## The floor
 
-`design-board.html` (published at https://claude.ai/artifact/G52cMgzizjd2beYVJe6qyy) leads with "Ballot and status tracking": specific designs for the tracker, receipt, stepper, timeline and admin views, plus GitHub Status history, one Sigstore log entry and the ElectionGuard pilot story. No government sites: the references are modern products (Linear, Stripe, Airbnb, Monzo, Granola and others).
-
-## Open choices for 9:15
-
-1. Palette: keep the deck's warm paper and navy, or go cooler and crisper?
-2. Typeface: Instrument Sans (recommended) or another modern sans?
-3. Dark mode: ship light first, dark only if time allows?
+WCAG 2.2 AA is the minimum for every screen and every state, checked by script for color and by keyboard and screen reader for everything else.

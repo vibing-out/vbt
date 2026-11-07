@@ -67,7 +67,10 @@ export function reduce(view: RunView, action: RunAction): RunView {
             ? { ...row, state: "ok", ranAt: line.ranAt, statuses: line.statuses, ...(line.fallback ? { fallback: line.fallback } : {}) }
             : { ...row, state: "failed", ranAt: line.ranAt, error: `${line.error}: ${line.message}` };
         });
-        return { ...view, steps };
+        // The route sends its first lines only once the first step has run, so the started line can
+        // arrive late; a step's own offset from the start keeps the countdown true.
+        const startedAt = view.startedAt === null ? null : Math.min(view.startedAt, action.now - line.ranAt * 1000);
+        return { ...view, steps, startedAt };
       }
       return { ...view, phase: "finished", result: line };
     }

@@ -139,6 +139,49 @@ describe("one run per set (AC 7)", () => {
     expect(world.events().length).toBe(events);
   });
 
+  test("two Starts at the same moment: one streams the run, the other gets 409 and writes nothing", async () => {
+    // Both checks read the set before either run writes, so both pass checkSet.
+    let arrived = 0;
+    let release: () => void = () => {};
+    const bothRead = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const api = {
+      ...world.api,
+      readSet: async (precinctId: string) => {
+        const ballots = await world.api.readSet(precinctId);
+        if (++arrived === 2) release();
+        await bothRead;
+        return ballots;
+      },
+    };
+    const clock = fakeClock();
+    vi.mocked(demoRunDeps.make).mockReturnValue({ api, simulator: world.simulator, clock });
+    const before = world.events().length;
+    const token = await aal2(USERS.state);
+    const responses = await Promise.all([call(`?set=${setId}`, bearer(token)), call(`?set=${setId}`, bearer(token))]);
+    expect(arrived).toBe(2);
+    expect(responses.map((r) => r.status).sort()).toEqual([200, 409]);
+    const winner = responses.find((r) => r.status === 200)!;
+    const loser = responses.find((r) => r.status === 409)!;
+    expect(loser.headers.get("cache-control")).toBe("no-store");
+    expect(await loser.json()).toMatchObject({ error: "already-ran" });
+    expect((await readLines(winner)).at(-1)).toMatchObject({ type: "finished", ok: true });
+    // Only the winning run's events: 1 spoil, 1 challenge, 3 + 3 + 3 batch moves, 1 discard.
+    expect(world.events().length - before).toBe(1 + 1 + 3 + 3 + 3 + 1);
+  });
+
+  test("any other first-step failure keeps the 200 stream, with the failed step and the finish", async () => {
+    const clock = fakeClock();
+    const failing = await seededWorld(clock, { failOn: { method: "uploadEventsFile", status: 500, message: "upstream broke", nth: 2 } });
+    vi.mocked(demoRunDeps.make).mockReturnValue({ api: failing.world.api, simulator: failing.world.simulator, clock });
+    const response = await call(`?set=${failing.seed.setId}`, bearer(await aal2(USERS.state)));
+    expect(response.status).toBe(200);
+    const lines = await readLines(response);
+    expect(lines.map((l) => (l.type === "step" ? l.id : l.type))).toEqual(["started", "spoil-d", "finished"]);
+    expect(lines[1]).toMatchObject({ ok: false, error: "api" });
+  });
+
   test("a set without exactly 5 ballots gets 409", async () => {
     const other = await seededWorld(fakeClock());
     vi.mocked(demoRunDeps.make).mockReturnValue({ api: { ...other.world.api, readSet: async () => [] }, simulator: world.simulator, clock: fakeClock() });

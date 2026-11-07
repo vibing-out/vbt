@@ -56,6 +56,16 @@ describe("countdown", () => {
     expect(html(view, 10_000 + 70_000)).toContain('data-testid="countdown" aria-live="polite" style="font-size:2rem;font-variant-numeric:tabular-nums">2:00<');
   });
 
+  test("a started line that arrives with the first step still counts from the run's start", () => {
+    // The route holds its first lines until the 0:20 step has run, then sends them together.
+    const spoiled = { type: "step", id: "spoil-d", title: "Spoil D", at: 20, ranAt: 20, ok: true, statuses } as const;
+    const view = play({ type: "start", setId: SET }, line(started, 30_000), line(spoiled, 30_000));
+    expect(secondsLeft(view, 30_000)).toBe(170);
+    // A later step a little behind on the network doesn't move the start forward.
+    const later = reduce(view, line({ ...spoiled, id: "precinct-tally", at: 45, ranAt: 45 }, 30_000 + 25_400));
+    expect(secondsLeft(later, 30_000 + 25_400)).toBe(145);
+  });
+
   test("freezes at the finish", () => {
     const view = play(
       { type: "start", setId: SET },

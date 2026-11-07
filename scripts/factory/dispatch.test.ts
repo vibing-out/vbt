@@ -193,10 +193,34 @@ describe('landed', () => {
     await expect(landed(40, { github, context, log: silent })).rejects.toThrow(/ingestion failed/)
     expect(github.calls).toEqual(['label #11 +needs-human', 'comment #11 Context ingestion failed for pull request #40, so dependent tickets were not dispatched.'])
   })
-  it('ignores pull requests that did not merge into an epic branch', async () => {
-    const github = fakeGitHub([], { ...pull, base: 'main' })
+  it('ignores pull requests that merged into neither an epic branch nor main', async () => {
+    const github = fakeGitHub([], { ...pull, base: 'feature/x' })
     await landed(40, { github, context: async () => 'unused', log: silent })
     expect(github.calls).toEqual([])
+  })
+
+  const ingestArgs = async (body: string, issues: Issue[] = []): Promise<{ args?: string[]; calls: string[] }> => {
+    const github = fakeGitHub(issues, { ...pull, base: 'main', body })
+    let args: string[] | undefined
+    await landed(40, { github, context: async (a) => ((args = a), 'ok'), log: silent })
+    return { args, calls: github.calls }
+  }
+  it('logs a setup pull request merged into main under topic setup, closing nothing', async () => {
+    const { args, calls } = await ingestArgs('```context-log\n{"version":1,"decisions":[],"corrections":[]}\n```')
+    expect(args).toEqual(['ingest', '--source', pull.url, '--commit', pull.mergeCommit, '--topic', 'setup'])
+    expect(calls).toEqual([])
+  })
+  it('logs a pull request into main under its ticket id when the body names one ticket', async () => {
+    const { args } = await ingestArgs(pull.body, [ticket({ number: 11, title: 'T-02 Domain' })])
+    expect(args?.at(-1)).toBe('T-02')
+  })
+  it('comments on the pull request when ingestion into main fails', async () => {
+    const github = fakeGitHub([], { ...pull, base: 'main', body: 'no block' })
+    const context = async (): Promise<string> => {
+      throw new Error('no context-log block')
+    }
+    await expect(landed(40, { github, context, log: silent })).rejects.toThrow(/ingestion failed for pull request #40/)
+    expect(github.calls).toEqual(['comment #40 Context ingestion failed for this pull request; log it by hand.'])
   })
 })
 

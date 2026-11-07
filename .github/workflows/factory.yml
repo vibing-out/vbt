@@ -1,8 +1,10 @@
 # The factory's deterministic routing: each job runs one subcommand of scripts/factory/dispatch.ts.
 #   check          a ticket gets `queued`: post earlier context, then label factory-ready (Warp's trigger) or blocked
-#   landed         a pull request merges into epic/*: log its context-log block, close the ticket, re-check what it blocked
+#   landed         a pull request merges into epic/*: log its context-log block, close the ticket, re-check what it blocked;
+#                  into main: log its context-log block only (setup work and epic roll-ups)
 #   unblock        an issue closes: re-check the blocked issues it held back (for an epic, those waiting on any of its tickets)
-#   context-check  a pull request into epic/* opens or changes: its body needs one valid context-log block (a required check)
+#   context-check  a pull request into epic/* or main opens or changes: its body needs one valid context-log block
+#                  (a required check), and an epic/* one also needs one `Ticket: #n` line
 #
 # Repository secrets required (the factory-dispatch identity in the context log, see the vbt-context README):
 #   CONTEXT_SUPABASE_URL, CONTEXT_SUPABASE_PUBLISHABLE_KEY, CONTEXT_EMAIL, CONTEXT_PASSWORD
@@ -18,7 +20,7 @@ on:
     types: [labeled, closed]
   pull_request:
     types: [opened, edited, synchronize, closed]
-    branches: ['epic/**']
+    branches: ['epic/**', 'main']
 
 permissions:
   issues: write

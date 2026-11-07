@@ -1,9 +1,9 @@
 // The factory's deterministic routing, with no dependencies and no model. GitHub Actions runs one
 // subcommand per event (see .github/workflows/factory.yml):
 //   node scripts/factory/dispatch.ts check <issue>         on `queued`: label factory-ready or blocked
-//   node scripts/factory/dispatch.ts landed <pr>           on a merge into epic/*: log, close, unblock
+//   node scripts/factory/dispatch.ts landed <pr>           on a merge into epic/*: log, close, unblock; into main: log
 //   node scripts/factory/dispatch.ts unblock <issue>       on an issue closing: re-check what it blocked
-//   node scripts/factory/dispatch.ts context-check <pr>    on epic/* pull requests: validate the body
+//   node scripts/factory/dispatch.ts context-check <pr>    on epic/* and main pull requests: validate the body
 // Reads GITHUB_TOKEN and GITHUB_REPOSITORY (owner/name) from the environment. `check` and `landed`
 // call scripts/context.ts, which reads its own sign-in variables (see that file).
 import { spawn } from 'node:child_process'
@@ -152,10 +152,11 @@ export async function check(number: number, deps: Deps): Promise<'skipped' | 're
 export async function landed(number: number, deps: Deps): Promise<void> {
   const { github, context, log = console.log } = deps
   const pr = await github.pull(number)
-  if (!pr.merged || !pr.base.startsWith('epic/')) {
-    log(`pull request #${number}: skipped, not merged into an epic branch`)
+  if (!pr.merged || !(pr.base.startsWith('epic/') || pr.base === 'main')) {
+    log(`pull request #${number}: skipped, not merged into an epic branch or main`)
     return
   }
+  if (pr.base === 'main') return landedOnMain(pr, number, deps)
   const ticket = ticketNumber(pr.body)
   const issue = await github.issue(ticket)
   const topic = ticketId(issue.title)
@@ -174,6 +175,27 @@ export async function landed(number: number, deps: Deps): Promise<void> {
   log(`#${ticket}: closed by pull request #${number}`)
   // In-process, because closing with GITHUB_TOKEN does not start the `issues: closed` workflow.
   await unblock(ticket, deps)
+}
+
+// Pull requests straight into main (setup work, epic roll-ups) are logged too, so their decisions and
+// corrections aren't lost. Topic: the ticket id when the body names one ticket, otherwise `setup`.
+// Nothing is closed or unblocked here: an epic's issue closes by hand or by "Closes" when it merges.
+async function landedOnMain(pr: Pull, number: number, deps: Deps): Promise<void> {
+  const { github, context, log = console.log } = deps
+  let topic = 'setup'
+  try {
+    topic = ticketId((await github.issue(ticketNumber(pr.body))).title) ?? 'setup'
+  } catch {
+    // No single "Ticket: #n" line, which is normal for setup pull requests.
+  }
+  try {
+    if (!pr.mergeCommit) throw new Error(`pull request #${number} has no merge commit`)
+    log(await context(['ingest', '--source', pr.url, '--commit', pr.mergeCommit, '--topic', topic], pr.body))
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    await github.comment(number, `Context ingestion failed for this pull request; log it by hand.\n\n${fenced(message)}`)
+    throw new Error(`ingestion failed for pull request #${number}: ${message}`)
+  }
 }
 
 // Open issues waiting on this one, labeled `blocked` (so they were queued and `check` held them).
@@ -206,7 +228,7 @@ export async function unblock(number: number, deps: Deps): Promise<void> {
 export async function contextCheck(number: number, deps: Deps): Promise<void> {
   const { github, context, log = console.log } = deps
   const pr = await github.pull(number)
-  ticketNumber(pr.body) // `landed` needs it, so the gate fails before the merge rather than after
+  if (pr.base.startsWith('epic/')) ticketNumber(pr.body) // `landed` needs it, so the gate fails before the merge rather than after
   log(await context(['check'], pr.body))
 }
 

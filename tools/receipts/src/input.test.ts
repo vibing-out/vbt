@@ -76,7 +76,25 @@ describe("parseInput", () => {
   it("still reports an unknown contest on a ballot style", () => {
     const raw = exampleRaw() as Raw;
     raw.manifest.ballot_styles[0].contest_ids.push("governor");
-    expect(() => parseInput(raw)).toThrow(/lists unknown contest governor/);
+    expect(() => parseInput(raw)).toThrow(/^manifest\.ballot_styles\[0\] lists unknown contest governor$/);
+  });
+
+  it("keeps a \"__proto__\" contest id as an ordinary key and refuses it as not on the style", () => {
+    // JSON.parse makes "__proto__" an own key; it must not become the choices object's prototype.
+    const raw = withBallot((b) => (b.choices = JSON.parse('{"__proto__": ["sen-oakley"]}')));
+    expect(() => parseInput(raw)).toThrow(/ballots\[0\]\.choices\.__proto__: contest is not on ballot style/);
+  });
+
+  it("parses choices into an object with no prototype", () => {
+    const { choices } = parseInput(exampleRaw()).ballots[0]!;
+    expect(Object.getPrototypeOf(choices)).toBeNull();
+    expect(Object.keys(choices).length).toBeGreaterThan(0);
+  });
+
+  it("refuses a selection under an inherited key such as \"constructor\"", () => {
+    expect(() => parseInput(withBallot((b) => (b.choices = { constructor: ["x"] })))).toThrow(
+      /choices\.constructor: contest is not on ballot style/,
+    );
   });
 
   it("rejects duplicate ids in the manifest", () => {

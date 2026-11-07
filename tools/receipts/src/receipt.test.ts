@@ -56,13 +56,21 @@ describe("AC1: the receipt's QR code opens the tracker for that code", () => {
 });
 
 describe("AC2: the receipt contains no ballot choices or time", () => {
-  it("has no choices, time of day, or machine ID in its text, for every ballot", async () => {
+  it("has no choices, time of day, machine ID or ballot style in its text or metadata, for every ballot", async () => {
     const docs = await generateBallotDocuments(input, { baseUrl: DEFAULT_TRACKER_BASE_URL });
-    const forbidden = [...choiceStrings(input), ...input.ballots.map((b) => b.machine_id)];
+    const forbidden = [
+      ...choiceStrings(input),
+      ...input.ballots.map((b) => b.machine_id),
+      ...input.ballots.map((b) => b.ballot_style),
+      ...input.manifest.ballot_styles.map((s) => s.id),
+    ];
+    expect(forbidden).toContain(ballot.ballot_style);
     for (const doc of docs) {
-      const { text } = await extractPdf(doc.receipt);
+      const { text, info } = await extractPdf(doc.receipt);
       expect(text).toContain(doc.trackingCode); // the extraction works
       for (const s of forbidden) expect(text).not.toMatch(wholeWord(s));
+      const infoJson = JSON.stringify(info);
+      for (const s of choiceStrings(input)) expect(infoJson).not.toContain(s);
       expect(text).not.toMatch(TIME_OF_DAY);
     }
   });
@@ -73,6 +81,8 @@ describe("AC2: the receipt contains no ballot choices or time", () => {
     expect(info.CreationDate).toBeUndefined();
     expect(info.ModDate).toBeUndefined();
     for (const value of Object.values(info)) expect(String(value)).not.toMatch(TIME_OF_DAY);
+    const infoJson = JSON.stringify(info);
+    for (const s of choiceStrings(input)) expect(infoJson).not.toContain(s);
 
     const raw = Buffer.from(pdf).toString("latin1");
     expect(raw).not.toContain("/CreationDate");

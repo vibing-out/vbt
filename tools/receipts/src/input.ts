@@ -124,6 +124,7 @@ function choiceError(problem: ChoiceProblem, path: string, styleId: string): str
 
 /** Puts the input path in front of a domain problem with a ballot style itself. */
 function styleError(problem: ChoiceProblem, path: string): string {
+  if (problem.code === "UNKNOWN_CONTEST") return `${path} lists unknown contest ${problem.contestId ?? ""}`;
   if (problem.code === "DUPLICATE_CONTEST") return `${path} lists a contest twice (${problem.contestId ?? ""})`;
   return `${path}: ${problem.message}`;
 }
@@ -149,17 +150,14 @@ export function parseInput(raw: unknown): ReceiptsInput {
 
   const m = object(root.manifest, "manifest", ["contests", "ballot_styles"]);
   const contests = array(m.contests, "manifest.contests").map((c, i) => parseContest(c, `manifest.contests[${i}]`));
-  const contestById = uniqueIds(contests, "manifest.contests");
+  uniqueIds(contests, "manifest.contests");
   const ballotStyles = array(m.ballot_styles, "manifest.ballot_styles").map((s, i) => {
     const path = `manifest.ballot_styles[${i}]`;
     const so = object(s, path, ["id", "contest_ids"]);
     const id = text(so.id, `${path}.id`);
     const contestIds = array(so.contest_ids, `${path}.contest_ids`).map((c, j) => text(c, `${path}.contest_ids[${j}]`));
-    for (const contestId of contestIds) {
-      if (!contestById.has(contestId)) throw new Error(`${path} lists unknown contest ${contestId}`);
-    }
     const style = { id, contest_ids: contestIds };
-    // Checked on its own, so a style with a repeated contest is refused even if no ballot uses it.
+    // The domain checks the contests are known and listed once. Checked on its own, so a style with a repeated contest is refused even if no ballot uses it.
     const problem = checkChoices({ contests, ballot_styles: [style] }, id, {});
     if (problem) throw new Error(styleError(problem, path));
     return style;
@@ -183,7 +181,9 @@ export function parseInput(raw: unknown): ReceiptsInput {
     parseCalendarDate(castDate, `${path}.cast_date`);
 
     if (!isObject(bo.choices)) throw new Error(`${path}.choices must be an object`);
-    const choices: Record<string, string[]> = {};
+    // No prototype, so a "__proto__" contest id is an ordinary own key (and refused as not on the style)
+    // instead of replacing the object's prototype.
+    const choices: Record<string, string[]> = Object.create(null) as Record<string, string[]>;
     for (const [contestId, picked] of Object.entries(bo.choices)) {
       const cpath = `${path}.choices.${contestId}`;
       choices[contestId] = array(picked, cpath).map((s, j) => text(s, `${cpath}[${j}]`));

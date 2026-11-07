@@ -149,4 +149,33 @@ describe("summarizeChoices", () => {
     expect(summarizeChoices(MANIFEST, "county", bad)).toEqual({ ok: false, ...checkChoices(MANIFEST, "county", bad) });
     expect(summarizeChoices(MANIFEST, "nope", {})).toMatchObject({ ok: false, code: "UNKNOWN_BALLOT_STYLE" });
   });
+
+  test("reads only the ballot's own choices, never inherited keys", () => {
+    // A contest id that is also an Object.prototype key ("toString", "constructor") is an undervote
+    // when the ballot doesn't choose it.
+    const manifest: Manifest = {
+      contests: [
+        { id: "toString", title: "Question A", vote_for: 1, selections: [{ id: "yes", name: "Yes" }] },
+        { id: "constructor", title: "Question B", vote_for: 1, selections: [{ id: "no", name: "No" }] },
+      ],
+      ballot_styles: [{ id: "q", contest_ids: ["toString", "constructor"] }],
+    };
+    expect(summarizeChoices(manifest, "q", { constructor: ["no"] })).toEqual({
+      ok: true,
+      contests: [
+        { contestId: "toString", title: "Question A", voteFor: 1, selected: [] },
+        { contestId: "constructor", title: "Question B", voteFor: 1, selected: ["No"] },
+      ],
+    });
+
+    // Choices inherited from a prototype are not the ballot's choices.
+    const inherited = Object.create({ "us-senate": ["sen-oakley"] }) as BallotChoices;
+    expect(summarizeChoices(MANIFEST, "county", inherited)).toMatchObject({
+      ok: true,
+      contests: [
+        { contestId: "school-board", selected: [] },
+        { contestId: "us-senate", selected: [] },
+      ],
+    });
+  });
 });

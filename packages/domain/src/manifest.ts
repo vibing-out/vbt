@@ -146,7 +146,8 @@ export function summarizeChoices(manifest: Manifest, styleId: string, choices: B
   const style = manifest.ballot_styles.find((s) => s.id === styleId) as BallotStyle;
   const contests = style.contest_ids.map((contestId): ContestSummary => {
     const contest = manifest.contests.find((c) => c.id === contestId) as Contest;
-    const selected = (choices[contestId] ?? []).map((id) => (contest.selections.find((s) => s.id === id) as Selection).name);
+    const picked = Object.hasOwn(choices, contestId) ? choices[contestId] : [];
+    const selected = (picked as readonly string[]).map((id) => (contest.selections.find((s) => s.id === id) as Selection).name);
     return { contestId, title: contest.title, voteFor: contest.vote_for, selected };
   });
   return { ok: true, contests };

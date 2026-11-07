@@ -1,0 +1,27 @@
+{
+  "name": "@vbt/verifier",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "24.x" },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "vbt-verify": "./src/cli.ts"
+  },
+  "scripts": {
+    "verify": "pnpm --filter @vbt/crypto build && node src/cli.ts",
+    "typecheck": "pnpm --filter @vbt/crypto build && tsc --noEmit",
+    "test": "pnpm --filter @vbt/crypto build && vitest run"
+  },
+  "dependencies": {
+    "@vbt/crypto": "workspace:*",
+    "@vbt/events": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@vbt/scale-demo": "workspace:*",
+    "typescript": "5.9.3",
+    "vitest": "5.1.0"
+  }
+}

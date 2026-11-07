@@ -6,3 +6,6 @@ node_modules/
 .env.local
 # Per-agent sign-in files for scripts/context.ts hold passwords.
 agents/
+.next/
+next-env.d.ts
+*.tsbuildinfo

@@ -44,6 +44,17 @@
     border-color: black !important;
   }
 
+  /* The receipt slip prints black only on white or colored stock, with no gray tints: thermal
+     printers band them (Receipt README, Paper: the slip). Fills are dropped so the stock shows;
+     SVG fills are left alone so the QR code's modules and quiet zone survive. */
+  .vbt-slip,
+  .vbt-slip * {
+    color: black !important;
+    border-color: black !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
   /* Shadows become thin rules. */
   .vbt-card,
   .vbt-table-wrap,

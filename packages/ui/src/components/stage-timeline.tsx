@@ -76,7 +76,7 @@ function resolveNodes(props: StageTimelineProps): Node[] {
       state: entry?.state ?? ("upcoming" as StageState),
       date: dateOnly(entry?.date, `The ${stage} date`),
       expected: dateOnly(entry?.expected, `The ${stage} expected date`),
-      label: props.labels?.[stage] ?? STAGE_LABELS[stage],
+      label: props.labels?.[stage] ?? STAGE_LABELS[props.mode ?? "voter"][stage],
     };
   });
 
@@ -201,9 +201,9 @@ export function StageTimeline(props: StageTimelineProps) {
     previous.current = currentStage;
     if (!currentStage || !before || currentStage === before) return;
     if (STAGES.indexOf(currentStage) > STAGES.indexOf(before)) {
-      setAnnouncement(`Your ballot moved to ${props.labels?.[currentStage] ?? STAGE_LABELS[currentStage]}.`);
+      setAnnouncement(`Your ballot moved to ${props.labels?.[currentStage] ?? STAGE_LABELS[mode][currentStage]}.`);
     }
-  }, [currentStage, props.labels]);
+  }, [currentStage, props.labels, mode]);
 
   const root = {
     "data-component": "timeline",

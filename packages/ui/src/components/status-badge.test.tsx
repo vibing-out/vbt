@@ -3,7 +3,19 @@ import { describe, expect, test } from "vitest";
 import { BALLOT_STATUSES, type BallotStatus } from "../status";
 import { PlainBadge, StatusBadge, type StatusBadgeProps } from "./status-badge";
 
-// StatusBadge README, Variants, word for word.
+// The locked public labels (docs/locked-interfaces.md, "Ballot status state machine"), written
+// out here so the rendered text is checked against the doc, not against the constant.
+const LOCKED: Record<BallotStatus, string> = {
+  CAST: "Cast and sealed",
+  TALLIED_PRECINCT: "Counted at precinct",
+  REPORTED_UNOFFICIAL: "Included in election-night results",
+  CERTIFIED: "Included in certified results",
+  CHALLENGED: "Under review",
+  DISCARDED: "Not counted",
+  SPOILED: "Spoiled by voter to check the machine; not counted",
+};
+
+// StatusBadge README, Variants, word for word. The labels are the admin labels.
 const README: Record<BallotStatus, { label: string; dot: string; fill: string; text: string; icon?: string }> = {
   CAST: { label: "Cast", dot: "bg-ink-muted", fill: "bg-surface-sunk", text: "text-ink" },
   TALLIED_PRECINCT: { label: "Counted at precinct", dot: "bg-ink", fill: "bg-surface-sunk", text: "text-ink" },
@@ -42,9 +54,9 @@ const visible = (el: HTMLElement) => el.textContent?.replace("Status: ", "");
 describe.each(BALLOT_STATUSES)("StatusBadge %s", (status) => {
   const spec = README[status];
 
-  test("voter: an 8px dot, the README label, fill and text, 14px weight 600", () => {
+  test("voter: an 8px dot, the locked public label, README fill and text, 14px weight 600", () => {
     const el = badge({ status });
-    expect(visible(el)).toBe(spec.label);
+    expect(visible(el)).toBe(LOCKED[status]);
     expect(el.dataset.status).toBe(status);
     const cls = el.className.split(" ");
     expect(cls).toEqual(expect.arrayContaining([spec.fill, spec.text, "text-small", "font-semibold"]));
@@ -54,7 +66,7 @@ describe.each(BALLOT_STATUSES)("StatusBadge %s", (status) => {
     expect(el.querySelector("svg")).toBeNull();
   });
 
-  test("admin: small weight 500; the README icon at 14px in place of the dot, if it has one", () => {
+  test("admin: the README label, small weight 500; the README icon at 14px in place of the dot, if it has one", () => {
     const el = badge({ status, mode: "admin" });
     expect(visible(el)).toBe(spec.label);
     expect(el.className.split(" ")).toEqual(expect.arrayContaining([spec.fill, spec.text, "text-small", "font-medium"]));
@@ -87,6 +99,13 @@ describe("StatusBadge anatomy and behavior", () => {
   test("cross-fades over duration-base, instantly under reduced motion", () => {
     const cls = badge({ status: "CAST" }).className.split(" ");
     expect(cls).toEqual(expect.arrayContaining(["duration-base", "ease-out", "motion-reduce:transition-none"]));
+  });
+
+  test("the same status reads differently by mode: locked label for voters, README label for admin", () => {
+    expect(visible(badge({ status: "CERTIFIED", mode: "voter" }))).toBe("Included in certified results");
+    expect(visible(badge({ status: "CERTIFIED", mode: "admin" }))).toBe("Certified");
+    expect(visible(badge({ status: "REPORTED_UNOFFICIAL", mode: "voter" }))).toBe("Included in election-night results");
+    expect(visible(badge({ status: "REPORTED_UNOFFICIAL", mode: "admin" }))).toBe("Election-night results");
   });
 
   test("label override (Spanish strings)", () => {

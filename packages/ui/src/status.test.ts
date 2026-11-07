@@ -24,8 +24,12 @@ describe("status presentation matches the locked state machine", () => {
     expect([...STAGES, ...OFF_PATH_STATUSES].sort()).toEqual([...BALLOT_STATUSES].sort());
   });
 
-  test("badge labels (voter and admin) are the StatusBadge README's, word for word", () => {
-    expect(BADGE_LABELS).toEqual({
+  test("voter badge labels are the locked public labels", () => {
+    expect(BADGE_LABELS.voter).toEqual(VOTER_LABELS);
+  });
+
+  test("admin badge labels are the StatusBadge README's, word for word", () => {
+    expect(BADGE_LABELS.admin).toEqual({
       CAST: "Cast",
       TALLIED_PRECINCT: "Counted at precinct",
       REPORTED_UNOFFICIAL: "Election-night results",
@@ -36,8 +40,12 @@ describe("status presentation matches the locked state machine", () => {
     });
   });
 
-  test("timeline stage labels are the StageTimeline README's", () => {
-    expect(STAGE_LABELS).toEqual({
+  test("voter timeline stage labels are the locked public labels", () => {
+    for (const stage of STAGES) expect(STAGE_LABELS.voter[stage]).toBe(VOTER_LABELS[stage]);
+  });
+
+  test("admin timeline stage labels are the StageTimeline README's", () => {
+    expect(STAGE_LABELS.admin).toEqual({
       CAST: "Cast and sealed",
       TALLIED_PRECINCT: "Counted at precinct",
       REPORTED_UNOFFICIAL: "Election-night results",

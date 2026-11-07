@@ -56,7 +56,7 @@ export function StatusBadge({ status, mode = "voter", label, className }: Status
         <span data-slot="dot" aria-hidden="true" className={cn("size-2 shrink-0 rounded-pill", variant.dot)} />
       )}
       <span className="sr-only">Status: </span>
-      {label ?? BADGE_LABELS[status]}
+      {label ?? BADGE_LABELS[mode][status]}
     </span>
   );
 }

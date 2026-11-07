@@ -32,7 +32,12 @@ describe.each(["raised", "hero"] as const)("StageTimeline on %s", (surface) => {
     const { root, items } = timeline({ stages: TONIGHT, surface });
     expect(root.querySelector("ol")).toBeTruthy();
     expect(items.map((li) => li.dataset.stage)).toEqual(["CAST", "TALLIED_PRECINCT", "REPORTED_UNOFFICIAL", "CERTIFIED"]);
-    expect(items.map((li) => visibleText(li)[0])).toEqual(["Cast and sealed", "Counted at precinct", "Now", "Certified"]);
+    expect(items.map((li) => visibleText(li)[0])).toEqual([
+      "Cast and sealed",
+      "Counted at precinct",
+      "Now",
+      "Included in certified results",
+    ]);
   });
 
   test('the current stage: aria-current="step", the "Now" eyebrow above its label, and its date', () => {
@@ -40,7 +45,7 @@ describe.each(["raised", "hero"] as const)("StageTimeline on %s", (surface) => {
     const current = items.filter((li) => li.getAttribute("aria-current") === "step");
     expect(current).toHaveLength(1);
     expect(current[0]?.dataset.stage).toBe("REPORTED_UNOFFICIAL");
-    expect(visibleText(current[0]!)).toEqual(["Now", "Election-night results", "Nov 3"]);
+    expect(visibleText(current[0]!)).toEqual(["Now", "Included in election-night results", "Nov 3"]);
     expect(current[0]?.querySelector(".text-label.uppercase")?.textContent).toBe("Now");
     // Only the current stage says "Now".
     expect(items.filter((li) => li.textContent?.includes("Now"))).toHaveLength(1);
@@ -51,8 +56,8 @@ describe.each(["raised", "hero"] as const)("StageTimeline on %s", (surface) => {
     expect(items.map(spoken)).toEqual([
       "Stage 1 of 4, Cast and sealed, done, Nov 3.",
       "Stage 2 of 4, Counted at precinct, done, Nov 3.",
-      "Stage 3 of 4, Election-night results, current, Nov 3.",
-      "Stage 4 of 4, Certified, upcoming, expected by Nov 18.",
+      "Stage 3 of 4, Included in election-night results, current, Nov 3.",
+      "Stage 4 of 4, Included in certified results, upcoming, expected by Nov 18.",
     ]);
     // Dots and the visible text are decorative; the meaning is in the spoken text.
     for (const li of items) expect(dot(li).closest('[aria-hidden="true"]')).toBeTruthy();
@@ -60,7 +65,7 @@ describe.each(["raised", "hero"] as const)("StageTimeline on %s", (surface) => {
 
   test('upcoming stages show "Expected by", never a time of day anywhere', () => {
     const { root, items } = timeline({ stages: TONIGHT, surface });
-    expect(visibleText(items[3]!)).toEqual(["Certified", "Expected by Nov 18"]);
+    expect(visibleText(items[3]!)).toEqual(["Included in certified results", "Expected by Nov 18"]);
     expect(root.textContent).not.toMatch(/\d{1,2}:\d{2}/);
   });
 
@@ -154,7 +159,7 @@ describe("StageTimeline exceptions", () => {
       offPath: { status: "DISCARDED", reason: "arrived after the deadline", date: "Nov 5" },
     });
     expect(items.map((li) => li.dataset.state)).toEqual(["done", "done", "discarded"]);
-    expect(root.textContent).not.toMatch(/Certified|Election-night|upcoming/);
+    expect(root.textContent).not.toMatch(/certified|election-night|upcoming/i);
     const terminal = items[2]!;
     expect(terminal.getAttribute("aria-current")).toBe("step");
     expect(visibleText(terminal)).toEqual(["Now", "Not counted: arrived after the deadline", "Nov 5"]);
@@ -188,7 +193,7 @@ describe("StageTimeline exceptions", () => {
   test("SPOILED without a replacement shows only the badge", () => {
     const { root } = timeline({ stages: [], offPath: { status: "SPOILED" } });
     expect(root.querySelector("a")).toBeNull();
-    expect(root.textContent).toBe("Status: Spoiled");
+    expect(root.textContent).toBe("Status: Spoiled by voter to check the machine; not counted");
   });
 });
 
@@ -212,7 +217,38 @@ describe("StageTimeline states", () => {
     expect(region.getAttribute("aria-live")).toBe("polite");
     expect(region.textContent).toBe("");
     rerender(<StageTimeline stages={TONIGHT} />);
-    expect(region.textContent).toBe("Your ballot moved to Election-night results.");
+    expect(region.textContent).toBe("Your ballot moved to Included in election-night results.");
+  });
+
+  test("voter mode: the visible labels are the locked public labels", () => {
+    const all: StageEntry[] = [
+      { stage: "CAST", state: "done", date: "Nov 3" },
+      { stage: "TALLIED_PRECINCT", state: "done", date: "Nov 3" },
+      { stage: "REPORTED_UNOFFICIAL", state: "done", date: "Nov 3" },
+      { stage: "CERTIFIED", state: "current", date: "Nov 18" },
+    ];
+    const { items } = timeline({ stages: all, mode: "voter" });
+    expect(items.map((li) => visibleText(li).filter((t) => t !== "Now")[0])).toEqual([
+      "Cast and sealed",
+      "Counted at precinct",
+      "Included in election-night results",
+      "Included in certified results",
+    ]);
+  });
+
+  test("admin mode: the visible labels are the StageTimeline README's", () => {
+    const { items } = timeline({ stages: TONIGHT, mode: "admin" });
+    expect(items.map((li) => visibleText(li).filter((t) => t !== "Now")[0])).toEqual([
+      "Cast and sealed",
+      "Counted at precinct",
+      "Election-night results",
+      "Certified",
+    ]);
+  });
+
+  test("SPOILED in admin mode shows the compact badge label", () => {
+    const { root } = timeline({ stages: [], mode: "admin", offPath: { status: "SPOILED" } });
+    expect(root.textContent).toBe("Status: Spoiled");
   });
 
   test("admin: body-size labels; labels can be overridden", () => {

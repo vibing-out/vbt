@@ -4,6 +4,7 @@
 // BallotStatus should be replaced by its type.
 
 import type { IconName } from "./components/icon";
+import type { Mode } from "./lib/mode";
 
 export const BALLOT_STATUSES = [
   "CAST",
@@ -40,23 +41,40 @@ export const VOTER_LABELS: Record<BallotStatus, string> = {
   SPOILED: "Spoiled by voter to check the machine; not counted",
 };
 
-/** StatusBadge labels, the same in voter and admin mode (StatusBadge README, Variants). */
-export const BADGE_LABELS: Record<BallotStatus, string> = {
-  CAST: "Cast",
-  TALLIED_PRECINCT: "Counted at precinct",
-  REPORTED_UNOFFICIAL: "Election-night results",
-  CERTIFIED: "Certified",
-  CHALLENGED: "Under review",
-  DISCARDED: "Not counted",
-  SPOILED: "Spoiled",
+/**
+ * StatusBadge labels by mode. Voter: the locked public labels (VOTER_LABELS). Admin: the compact
+ * StatusBadge README labels (Variants).
+ */
+export const BADGE_LABELS: Record<Mode, Record<BallotStatus, string>> = {
+  voter: VOTER_LABELS,
+  admin: {
+    CAST: "Cast",
+    TALLIED_PRECINCT: "Counted at precinct",
+    REPORTED_UNOFFICIAL: "Election-night results",
+    CERTIFIED: "Certified",
+    CHALLENGED: "Under review",
+    DISCARDED: "Not counted",
+    SPOILED: "Spoiled",
+  },
 };
 
-/** StageTimeline stage labels (StageTimeline README, Stages). */
-export const STAGE_LABELS: Record<Stage, string> = {
-  CAST: "Cast and sealed",
-  TALLIED_PRECINCT: "Counted at precinct",
-  REPORTED_UNOFFICIAL: "Election-night results",
-  CERTIFIED: "Certified",
+/**
+ * StageTimeline stage labels by mode. Voter: the locked public labels (VOTER_LABELS). Admin: the
+ * StageTimeline README labels (Stages).
+ */
+export const STAGE_LABELS: Record<Mode, Record<Stage, string>> = {
+  voter: {
+    CAST: VOTER_LABELS.CAST,
+    TALLIED_PRECINCT: VOTER_LABELS.TALLIED_PRECINCT,
+    REPORTED_UNOFFICIAL: VOTER_LABELS.REPORTED_UNOFFICIAL,
+    CERTIFIED: VOTER_LABELS.CERTIFIED,
+  },
+  admin: {
+    CAST: "Cast and sealed",
+    TALLIED_PRECINCT: "Counted at precinct",
+    REPORTED_UNOFFICIAL: "Election-night results",
+    CERTIFIED: "Certified",
+  },
 };
 
 /**

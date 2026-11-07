@@ -19,7 +19,7 @@ export interface TokenOverride {
 }
 
 const LOGGED_PAIRS_DECISION =
-  "T-03: packages/ui adds seven component color pairs that the approved docs tokens.json contrast.pairs does not list to its tokens.json copy as logged overrides, each passing in both themes; no token value changes. Text pairs held to 4.5:1: surface-inverse on on-inverse, and status-challenged, status-discarded and status-spoiled on surface-sunk. Icon pairs held to 3:1, for the check, flag and x icons cut out of StageTimeline dots: surface-raised on ink, surface-raised on status-challenged, surface-raised on status-discarded.";
+  "T-03: packages/ui adds seven component color pairs that the approved docs tokens.json contrast.pairs does not list to its tokens.json copy as logged overrides, each passing in both themes; no token value changes. Text pairs held to 4.5:1: status-challenged, status-discarded and status-spoiled on surface-sunk. Icon pairs for the check, flag and x icons cut out of StageTimeline dots: surface-inverse on on-inverse on the hero card, held to 4.5:1; on light cards, surface-raised on ink, surface-raised on status-challenged and surface-raised on status-discarded, held to 3:1.";
 
 export const overrides: readonly TokenOverride[] = [
   {

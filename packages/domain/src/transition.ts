@@ -51,6 +51,11 @@ export const TRANSITIONS: readonly TransitionRule[] = Object.freeze([
   rule("CAST", "SPOILED"),
 ]);
 
+/** Stages that publish a stage record: the batch edges' targets ("Batch" column), in order. */
+export const PUBLISHED_STAGES: readonly BallotStatus[] = Object.freeze(
+  TRANSITIONS.filter((r) => r.batch !== null).map((r) => r.to),
+);
+
 export type TransitionErrorCode =
   | "INVALID_STATUS"
   | "INVALID_TRANSITION"

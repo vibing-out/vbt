@@ -1,24 +1,22 @@
-import { mismatchReportScope, OFFICIAL_ROLES } from "@vbt/domain";
-import { readMismatchReport } from "../../../../lib/mismatch-report";
-import { withServiceRoleReadOnly } from "../../../../lib/private-db";
+import { OFFICIAL_ROLES } from "@vbt/domain";
+import { badRequest, respond } from "../../../../lib/http";
+import { mismatchReport } from "../../../../lib/mismatches";
 import { forbidden, parseTarget, requireRole } from "../../../../lib/require-role";
+import { serviceDb } from "../../../../lib/official-db";
 
-// GET /api/reports/mismatches[?precinct=<id> | ?county=<id>] (T-11).
-// Officials only (poll worker, county, state) with an aal2 session (lib/require-role.ts). Without a
-// target the report covers the official's own scope; a target must be inside it. Lists the ballots
-// flagged in a mismatch, grouped by precinct, with dates only. Anything refused is 403; an authorized
-// request whose database is unavailable is 503 with no detail.
+// GET /api/reports/mismatches?precinct=<id> | ?county=<id> (T-09, locked API: mismatch list).
+// Officials in scope, with MFA. Each row: ballot id, tracking code, precinct, machine, status, the check
+// that failed and the date it was detected (never a time).
 export async function GET(request: Request): Promise<Response> {
   const target = parseTarget(new URL(request.url).searchParams);
   if (target === null) return forbidden();
   const auth = await requireRole(request, OFFICIAL_ROLES, target);
   if (!auth.ok) return auth.response;
-  const headers = { "cache-control": "no-store" };
+
+  if (!target) return badRequest("add ?precinct=<id> or ?county=<id>");
   try {
-    const scope = mismatchReportScope(auth.official, target);
-    const report = await withServiceRoleReadOnly((db) => readMismatchReport(db, scope));
-    return Response.json(report, { headers });
+    return respond({ status: 200, body: { mismatches: await mismatchReport(target, serviceDb()) } });
   } catch {
-    return Response.json({ error: "unavailable" }, { status: 503, headers });
+    return respond({ status: 500, body: { error: "the mismatch report failed" } });
   }
 }

@@ -36,6 +36,9 @@ describe("AC1: exports status and transition types matching Locked interfaces", 
       "BATCH_SCOPES",
       "CHALLENGEABLE_STATUSES",
       "findRule",
+      "PUBLISHED_STAGES",
+      "orderByChain",
+      "FALLBACK_RANK",
     ]) {
       expect(domain).toHaveProperty(name);
     }

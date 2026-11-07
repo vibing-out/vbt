@@ -16,6 +16,8 @@ const fixture: K6SummaryData & Record<string, unknown> = {
     track_failed: { values: { rate: 0.002, passes: 30, fails: 14970 } },
     record_failed: { values: { rate: 0.002, passes: 3, fails: 1497 } },
     track_rate_limited: { values: { rate: 0.011, passes: 165, fails: 14835 } },
+    track_not_found: { values: { rate: 0.2, passes: 3000, fails: 12000 } },
+    record_not_found: { values: { rate: 0, passes: 0, fails: 1500 } },
     record_rate_limited: { values: { rate: 0, passes: 0, fails: 1500 } },
   },
   state: { testRunDurationMs: 300012.5, isStdOutTTY: false, startedAt: "2026-11-07T21:14:09.123Z" },
@@ -29,6 +31,7 @@ const meta = {
   trackRate: 50,
   recordRate: 5,
   duration: "5m",
+  target: "Production build of apps/web against a local Supabase stack",
 };
 
 describe("summarize", () => {
@@ -43,8 +46,24 @@ describe("summarize", () => {
       nanoLimitsEmulated: false,
       tested: { trackRatePerSecond: 50, recordRatePerSecond: 5, duration: "5m" },
       endpoints: {
-        track: { requests: 15000, medianMs: 41.2, p95Ms: 180.6, p99Ms: 320, errorRate: 0.002, rateLimitedRate: 0.011 },
-        record: { requests: 1500, medianMs: 60, p95Ms: 240.4, p99Ms: 410, errorRate: 0.002, rateLimitedRate: 0 },
+        track: {
+          requests: 15000,
+          medianMs: 41.2,
+          p95Ms: 180.6,
+          p99Ms: 320,
+          errorRate: 0.002,
+          rateLimitedRate: 0.011,
+          notFoundRate: 0.2,
+        },
+        record: {
+          requests: 1500,
+          medianMs: 60,
+          p95Ms: 240.4,
+          p99Ms: 410,
+          errorRate: 0.002,
+          rateLimitedRate: 0,
+          notFoundRate: 0,
+        },
       },
       thresholdsPassed: true,
     });
@@ -58,6 +77,10 @@ describe("summarize", () => {
     expect(text).not.toMatch(/\d{1,2}:\d{2}/);
     expect(text).not.toMatch(/\d{4}-\d{2}-\d{2}T/);
     expect(results.runDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("records the run's target description", () => {
+    expect(summarize(fixture, { ...meta, target: "In-memory demo build" }).target).toBe("In-memory demo build");
   });
 
   it("fails the run when any threshold failed", () => {
@@ -77,6 +100,7 @@ describe("summarize", () => {
       p99Ms: null,
       errorRate: null,
       rateLimitedRate: null,
+      notFoundRate: null,
     });
   });
 });

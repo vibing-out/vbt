@@ -16,6 +16,9 @@ const SCANNED_ROOTS = ["apps/web", "packages/*/src", "tools/*/src", "supabase/li
 const OUTBOUND_ALLOWLIST: Record<string, string> = {
   "apps/web/app/official/demo/demo-control.tsx": "same-origin: calls this app's own /api routes",
   "apps/web/lib/product-db.ts": "our own Supabase: reads app_info through the Data API",
+  "apps/web/app/official/demo/demo-control.tsx": "same-origin calls to VBT's own API (demo driver); never a voting system",
+  "tools/demo/src/cli.ts": "same-origin calls to VBT's own API (demo driver); never a voting system",
+  "tools/demo/src/http-ports.ts": "same-origin calls to VBT's own API (demo driver); never a voting system",
   "apps/web/lib/context-log.ts": "our own Supabase: the team's context-log project",
   "apps/web/lib/require-role.ts": "our own Supabase: Auth session, role and MFA check",
   "apps/web/lib/service-db.ts": "our own Supabase: service-role RPCs for ingest and batches (T-05)",

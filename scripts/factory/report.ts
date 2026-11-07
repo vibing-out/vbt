@@ -162,6 +162,24 @@ export function check(body: string, kind: Kind): Checked {
   return { errors, verdict, failed, findings: found }
 }
 
+// Lines a caller's wrapper may print around the report: its heading, models, usage and check result, or a run link.
+const WRAPPER_LINE = /^(claude (review|verification)|CLAUDE_MODELS=|REPORT_CHECK|usage:|(warp )?run:)/i
+
+// The report alone: from its first section heading to its last content line, without wrapper lines around it.
+// check() already ignores text before the first heading; render() posts the body, so it trims both ends.
+export function reportOnly(body: string, kind: Kind): string {
+  const lines = body.split('\n')
+  const titles = new Set(SECTIONS[kind])
+  const start = lines.findIndex(line => {
+    const heading = /^###\s+(.+?)\s*#*\s*$/.exec(line)
+    return heading !== null && titles.has(heading[1] ?? '')
+  })
+  if (start === -1) return body.trim()
+  let end = lines.length
+  while (end > start + 1 && (lines[end - 1]?.trim() === '' || WRAPPER_LINE.test(lines[end - 1]?.trim() ?? ''))) end--
+  return lines.slice(start, end).join('\n').trim()
+}
+
 export type RenderOptions = { kind: Kind; title: string; models?: string; run?: string }
 
 export function render(body: string, options: RenderOptions): { errors: string[]; comment: string } {
@@ -177,7 +195,7 @@ export function render(body: string, options: RenderOptions): { errors: string[]
     ...(options.models ? [options.models, ''] : []),
     `Findings: ${counts}. Criteria failed: ${result.failed}.`,
     '',
-    body.trim(),
+    reportOnly(body, options.kind),
     ...(options.run ? ['', `Warp run: ${options.run}`] : []),
     '',
   ].join('\n')

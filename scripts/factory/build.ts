@@ -2,7 +2,9 @@
 // Actions job (.github/workflows/build.yml), with Claude Code on the team's subscription token doing all the
 // thinking. This script decides nothing itself: it runs each stage's `claude -p` call in order, posts what
 // Claude wrote, and routes on the VERDICT line every stage must end with.
-//   node scripts/factory/build.ts <issue>
+//   node scripts/factory/build.ts <issue> [--shadow]
+// --shadow works a ticket without `factory-ready` (a trial run on a ticket Warp isn't working); every other
+// addressing rule still applies.
 // Stages: triage -> spec -> implement -> review (up to MAX_REVIEW_ROUNDS, fixes go back to implement) ->
 // required checks -> squash merge -> dispatch.ts `landed` in-process. The prompts are
 // scripts/factory/prompts/<stage>.md; each gets the ticket and earlier stages' output appended as data.
@@ -14,9 +16,10 @@
 // merged pull request. So this script dispatches the required checks itself, merges the pull request itself,
 // and runs `landed` and `notify` in-process instead of waiting for their events.
 import { spawn } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { landed, notify, restGitHub, runContext, ticketId, type Deps as DispatchDeps, type GitHub, type Issue } from './dispatch.ts'
+import { check as checkReport, render as renderReport } from './report.ts'
 
 export const STAGES = ['triage', 'spec', 'implement', 'review'] as const
 export type Stage = (typeof STAGES)[number]
@@ -55,6 +58,36 @@ export function verdict(text: string): Verdict {
   const last = [...text.matchAll(/^\s*\**VERDICT:\**\s*([a-z-]+)/gim)].at(-1)?.[1]?.toLowerCase()
   return last === 'clean' || last === 'fixes' || last === 'needs-human' ? last : NEEDS_HUMAN
 }
+
+// The review's report without the router's VERDICT line, so report.ts checks and renders only the report.
+export function withoutVerdict(text: string): string {
+  return text.split('\n').filter((line) => !/^\s*\**VERDICT:/i.test(line)).join('\n').trim()
+}
+
+// Routes a review round. An explicit needs-human (a locked interface or another ticket's area) always stops.
+// Otherwise the checked report decides: an open unambiguous fix means fixes; open judgment calls go to the
+// epic approver in the Review log and don't block. A report that failed its check falls back to the VERDICT line.
+export function reviewVerdict(text: string, report: { ok: boolean; verdict: string }): Verdict {
+  if (/^\s*\**VERDICT:\**\s*needs-human/im.test(text)) return NEEDS_HUMAN
+  if (!report.ok) return verdict(text)
+  return report.verdict === 'fixes needed' ? 'fixes' : 'clean'
+}
+
+// Saves the evidence the review prompt reads, since read-only Claude Code can't run commands. Arguments:
+// $1 the pull request number, $2 the base ref. Waits up to 7 minutes for checks; never fails the run.
+export const EVIDENCE_SCRIPT = `
+git diff "$2"...HEAD > /tmp/pr.diff
+gh pr view "$1" --json body --jq .body > /tmp/pr-body.md
+sleep 20
+timeout 420 gh pr checks "$1" --watch --interval 30 >/dev/null 2>&1; gh pr checks "$1" > /tmp/ci-checks.txt 2>&1
+run=$(gh run list --commit "$(git rev-parse HEAD)" --workflow CI --limit 1 --json databaseId --jq '.[0].databaseId')
+if [ -n "$run" ]; then
+  gh run view "$run" --json jobs --jq '.jobs[] | .name as $j | .steps[] | "\\($j) / \\(.name): \\(.conclusion)"' > /tmp/ci-tests.txt
+  gh run view "$run" --log 2>/dev/null | perl -pe 's/(\\e|\\^\\[)\\[[0-9;]*m//g; s/^.*?Z //' | grep -E 'Test Files|Tests +[0-9]|[0-9]+ (passed|failed)|✓|×|FAIL' | head -300 >> /tmp/ci-tests.txt
+else echo "No CI run found for this commit." > /tmp/ci-tests.txt; fi
+gh api "repos/{owner}/{repo}/deployments?sha=$(git rev-parse HEAD)&per_page=1" --jq '.[0].statuses_url // empty' | xargs -r -I@ gh api @ --jq '[.[] | select(.state=="success")][0].environment_url // empty' > /tmp/preview-url.txt
+exit 0
+`
 
 export type ClaudeRun = { text: string; modelsLine: string; costUsd: number | null }
 
@@ -162,12 +195,15 @@ export type BuildDeps = {
   exec: Exec
   prompt: (stage: Stage) => Promise<string>
   // dispatch.ts `notify` and `landed`, run in-process (see the header).
+  writeFile: (path: string, text: string) => Promise<void>
   notify: (issue: number) => Promise<unknown>
   landed: (pr: number) => Promise<void>
   runUrl: string
   runId: number
   sleep: (ms: number) => Promise<void>
   log?: (line: string) => void
+  // Work the ticket without requiring `factory-ready` (see --shadow in the header).
+  shadow?: boolean
 }
 
 class Stop extends Error {}
@@ -223,8 +259,8 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
 
     // 1. Addressing: same rules as the Warp Foreman.
     const issue: Issue = await github.issue(number)
-    if (issue.state !== 'OPEN' || !issue.labels.includes('factory-ready') || issue.labels.includes('local')) {
-      log(`#${number}: skipped, not an open factory-ready ticket outside local`)
+    if (issue.state !== 'OPEN' || !(deps.shadow || issue.labels.includes('factory-ready')) || issue.labels.includes('local')) {
+      log(`#${number}: skipped, not an open ${deps.shadow ? '' : 'factory-ready '}ticket outside local`)
       return 'skipped'
     }
     const inFlight = await ok('gh', ['pr', 'list', '--state', 'open', '--search', `"Ticket: #${number}" in:body`, '--json', 'number', '--jq', '.[].number'])
@@ -254,7 +290,13 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
     // A rerun (after a person answered needs-human) continues the existing branch instead of starting over.
     const resumed = Boolean(await ok('git', ['ls-remote', '--heads', 'origin', branch]))
     await ok('git', ['worktree', 'add', '-B', branch, WORKTREE, resumed ? `origin/${branch}` : `origin/${epicBranch}`])
-    const ticketText = `#${issue.number} ${issue.title}\n\n${await ok('gh', ['issue', 'view', String(number), '--json', 'body,comments', '--jq', '.body + "\\n\\n" + ([.comments[] | select(.body | test("Context from earlier tickets")) | .body] | join("\\n\\n"))'])}`
+    // Earlier tickets' context reaches Claude only through /tmp/ticket-context.md, below.
+    const ticketText = `#${issue.number} ${issue.title}\n\n${await ok('gh', ['issue', 'view', String(number), '--json', 'body', '--jq', '.body'])}`
+    // Files the prompts read: read-only Claude Code reads them but can't fetch them itself. Only dispatch's
+    // own context comment counts: on a public repository anyone can post one that merely looks like it.
+    await deps.writeFile('/tmp/ticket.json', await ok('gh', ['issue', 'view', String(number), '--json', 'number,title,body,labels']))
+    await deps.writeFile('/tmp/ticket-context.md', await ok('gh', ['issue', 'view', String(number), '--json', 'comments', '--jq', '[.comments[] | select(.author.login == "github-actions" and (.body | startswith("## Context from earlier tickets"))) | .body] | last // ""']))
+    await deps.writeFile('/tmp/report.example.md', await ok('cat', ['scripts/factory/report.example.md'], { cwd: REPO_ROOT }))
     const modelsLines: string[] = []
 
     // 4. Triage.
@@ -305,23 +347,46 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
         await ok('gh', ['pr', 'edit', String(pr), '--body-file', '-'], { input: body })
       }
 
-      // Review, fresh context, read-only.
+      // Review, fresh context, read-only, after the required checks ran, so it reports real CI results.
+      // (A push made with GITHUB_TOKEN starts no workflow, so the checks are dispatched here.)
+      await github.dispatchWorkflow('ci.yml', branch)
+      await github.dispatchWorkflow('factory.yml', branch, { pr: String(pr) })
       await comment(pr, `Review round ${round} started (Claude Code, Opus).`)
-      const diff = await ok('git', ['diff', `origin/${epicBranch}...HEAD`], { cwd: WORKTREE })
+      await ok('sh', ['-c', EVIDENCE_SCRIPT, 'evidence', String(pr), `origin/${epicBranch}`], { cwd: WORKTREE })
       const review = await claude('review', [
         { heading: 'Acceptance criteria and ticket', text: ticketText },
-        { heading: 'Plan', text: spec.text },
-        { heading: 'Diff', text: diff.slice(0, 150_000) },
+        ...(findings ? [{ heading: `Review round ${round - 1} findings, to mark fixed or open`, text: findings }] : []),
       ])
       modelsLines.push(`review round ${round}: ${review.modelsLine}`)
-      const v = verdict(review.text)
-      const heading = v === 'clean' ? `Review round ${round}: clean` : `Review round ${round} findings`
-      const commentUrl = await comment(pr, `## ${heading}\n\n${review.text}\n\n${review.modelsLine}`)
+      let report = withoutVerdict(review.text)
+      let checked = checkReport(report, 'review')
+      if (checked.errors.length) {
+        // One repair pass in the same conversation, as the Warp Review agent does.
+        const repair = await exec(
+          'claude',
+          ['-p', '--continue', '--model', 'opus', '--effort', 'medium', '--allowedTools', 'Read,Grep,Glob', '--disallowedTools', TOOLS.review.disallowed, '--output-format', 'json'],
+          { input: `Your report failed the format check. Fix these problems and output the whole corrected report, nothing else:\n${checked.errors.join('\n')}`, cwd: WORKTREE },
+        )
+        try {
+          report = withoutVerdict(parseClaude(repair.stdout).text)
+          checked = checkReport(report, 'review')
+        } catch (err) {
+          log(`#${number}: report repair failed: ${err instanceof Error ? err.message : err}`)
+        }
+      }
+      const v = reviewVerdict(review.text, { ok: checked.errors.length === 0, verdict: checked.verdict })
+      const rendered = renderReport(report, { kind: 'review', title: `Review round ${round}`, models: review.modelsLine })
+      const commentUrl = await comment(
+        pr,
+        rendered.errors.length
+          ? `## Review round ${round} findings\n\n${review.modelsLine}\n\nREPORT_CHECK=failed: ${rendered.errors.join('; ')}\n\n${report}`
+          : rendered.comment,
+      )
       rounds.push({ round, verdict: v, modelsLine: review.modelsLine, commentUrl })
       if (v === NEEDS_HUMAN) await stopForHuman([number, pr], `review round ${round} found a change to a locked interface or another ticket's area.`)
       if (v === 'clean') break
       if (round === MAX_REVIEW_ROUNDS) await stopForHuman([number, pr], `review still has findings after ${MAX_REVIEW_ROUNDS} rounds.`)
-      findings = review.text
+      findings = report
     }
 
     // 8. Record, then 9. checks and merge.
@@ -329,8 +394,7 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
     await ok('node', ['scripts/context.ts', 'check'], { input: finalBody, cwd: REPO_ROOT })
     await ok('gh', ['pr', 'edit', String(pr), '--body-file', '-'], { input: finalBody })
     await ok('gh', ['pr', 'ready', String(pr)])
-    await github.dispatchWorkflow('ci.yml', branch)
-    await github.dispatchWorkflow('factory.yml', branch, { pr: String(pr) })
+    // The last review round already dispatched the checks for this head commit.
     for (let waited = 0; ; waited += 30_000) {
       const r = await exec('gh', ['pr', 'checks', String(pr), '--required', '--json', 'name,bucket'])
       const list = r.stdout.trim() ? (JSON.parse(r.stdout) as { name: string; bucket: string }[]) : []
@@ -366,8 +430,9 @@ export const run: Exec = (command, args, options = {}) =>
 
 if (import.meta.main) {
   const [arg, ...extra] = process.argv.slice(2)
+  const shadow = extra.length === 1 && extra[0] === '--shadow'
   try {
-    if (!arg || !/^\d+$/.test(arg) || extra.length) throw new Error('usage: node build.ts <issue>')
+    if (!arg || !/^\d+$/.test(arg) || (extra.length && !shadow)) throw new Error('usage: node build.ts <issue> [--shadow]')
     const token = process.env.GITHUB_TOKEN
     if (!token) throw new Error('GITHUB_TOKEN is not set')
     if (!process.env.CLAUDE_CODE_OAUTH_TOKEN) throw new Error('CLAUDE_CODE_OAUTH_TOKEN is not set')
@@ -378,11 +443,13 @@ if (import.meta.main) {
       github,
       exec: run,
       prompt: (stage) => readFile(`${PROMPTS_DIR}${stage}.md`, 'utf8'),
+      writeFile: (path, text) => writeFile(path, text),
       notify: (issue) => notify(issue, dispatchDeps),
       landed: (pr) => landed(pr, dispatchDeps),
       runUrl: process.env.RUN_URL ?? '',
       runId: Number(process.env.GITHUB_RUN_ID ?? 0),
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      shadow,
     })
     console.log(`#${arg}: ${result}`)
   } catch (err) {

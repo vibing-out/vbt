@@ -22,6 +22,11 @@ on:
         description: Ticket issue number (must carry factory-ready)
         required: true
         type: number
+      shadow:
+        description: Trial run on a ticket without factory-ready (one Warp isn't working)
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -58,6 +63,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
           ISSUE: ${{ inputs.issue }}
+          SHADOW: ${{ inputs.shadow }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           SUPABASE_URL: ${{ secrets.CONTEXT_SUPABASE_URL }}
@@ -65,4 +71,6 @@ jobs:
           CONTEXT_EMAIL: ${{ secrets.CONTEXT_EMAIL }}
           CONTEXT_PASSWORD: ${{ secrets.CONTEXT_PASSWORD }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        run: node scripts/factory/build.ts "$ISSUE"
+        run: |
+          if [ "$SHADOW" = "true" ]; then node scripts/factory/build.ts "$ISSUE" --shadow
+          else node scripts/factory/build.ts "$ISSUE"; fi

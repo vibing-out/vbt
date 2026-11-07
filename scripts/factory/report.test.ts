@@ -99,6 +99,18 @@ describe('render', () => {
     expect(bad).toEqual({ errors: ['missing section "### Summary"'], comment: '' })
   })
 
+  it('posts only the report when the caller passes its wrapper lines too', () => {
+    // T-20's review round 1 (pull request #55): the Foreman passed the Review agent's whole message, header and all.
+    const leaked = readFileSync(new URL('./report.t20-round1.md', import.meta.url), 'utf8')
+    expect(leaked.startsWith('Claude review')).toBe(true)
+    const { errors, comment } = render(`${leaked}\nREPORT_CHECK: passed\n`, { kind: 'review', title: 'Review round 1', models, run })
+    expect(errors).toEqual([])
+    expect(comment.match(/CLAUDE_MODELS=/g)).toHaveLength(1)
+    expect(comment).not.toMatch(/Claude review|REPORT_CHECK|usage:/)
+    expect(comment).toMatch(/Criteria failed: 0\.\n\n### What was checked\n/)
+    expect(comment.trimEnd().endsWith(`Warp run: ${run}`)).toBe(true)
+  })
+
   it('leaves out the run line when there is no run', () => {
     expect(render(example, { kind: 'review', title: 'Review round 2', models }).comment).not.toContain('Warp run:')
   })

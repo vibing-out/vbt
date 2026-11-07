@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  check, contextCheck, isSyncTicket, syncCheck, syncTitle, contextComment, followup, followupId, ticketId, resume, resumeSkipReason, epicReady, epicReadyMessage, landed, notify, readiness, restGitHub, slackMessage, slackText, ticketNumber, trimmed, unblock, webhookUrl,
+  check, contextCheck, isSyncTicket, syncCheck, syncTitle, contextComment, followup, followupId, ticketId, resume, resumeSkipReason, epicReady, epicReadyMessage, landed, notify, readiness, restGitHub, slackMessage, slackText, ticketNumber, trimmed, unblock, webhookUrl, refreshContext, refreshTargets,
   type Actor, type Blocker, type EpicPull, type GitHub, type Issue, type IssueRef, type LabelNotice, type Pull,
 } from './dispatch.ts'
 
@@ -44,6 +44,9 @@ function fakeGitHub(
     },
     async comment(n, body) {
       calls.push(`comment #${n} ${body.split('\n')[0]}`)
+    },
+    async postContext(n, body) {
+      calls.push(`context #${n} ${body.split('\n')[0]}`)
     },
     async addLabels(n, labels) {
       calls.push(`label #${n} +${labels.join(',')}`)
@@ -179,7 +182,7 @@ describe('check', () => {
       log: silent,
     })
     expect(result).toBe('ready')
-    expect(github.calls).toEqual(['comment #12 ## Context from earlier tickets', 'label #12 +factory-ready', 'label #12 -blocked'])
+    expect(github.calls).toEqual(['context #12 ## Context from earlier tickets', 'label #12 +factory-ready', 'label #12 -blocked'])
     // The blocker first, then the epic's other tickets, never the ticket itself.
     expect(searched).toEqual(['search --topic T-02 --limit 50', 'search --topic T-20 --limit 50'])
   })
@@ -215,7 +218,7 @@ describe('resume', () => {
     expect(github.calls).toEqual([
       'read unlabel #12 needs-human',
       'comment #12 Resuming: a person answered and removed needs-human.',
-      'comment #12 ## Context from earlier tickets',
+      'context #12 ## Context from earlier tickets',
       'label #12 +factory-ready',
     ])
   })
@@ -233,7 +236,7 @@ describe('resume', () => {
       'read unlabel #12 needs-human',
       'comment #12 Resuming: a person answered and removed needs-human.',
       'label #12 -factory-ready',
-      'comment #12 ## Context from earlier tickets',
+      'context #12 ## Context from earlier tickets',
       'label #12 +factory-ready',
     ])
   })
@@ -277,7 +280,7 @@ describe('landed', () => {
     const runs: string[] = []
     await landed(40, { github, context: async (args) => (runs.push(args[0] ?? ''), 'ok'), log: silent })
     expect(runs[0]).toBe('ingest')
-    expect(github.calls).toEqual(['close #11', 'comment #12 ## Context from earlier tickets', 'label #12 +factory-ready', 'label #12 -blocked'])
+    expect(github.calls).toEqual(['close #11', 'context #12 ## Context from earlier tickets', 'label #12 +factory-ready', 'label #12 -blocked'])
   })
   it('passes the pull request URL, merge commit and ticket id to ingest, with the body on stdin', async () => {
     const { github } = setup()
@@ -355,6 +358,82 @@ describe('follow-up tickets', () => {
   })
 })
 
+describe('context refresh', () => {
+  // T-02 (#11) lands. T-04 (#12) is blocked by it and already with the factory; T-20 (#13) is in the
+  // same epic and with the factory; T-01 (#10) is in the epic but still queued.
+  const setup = () => {
+    const e1 = { ...ref(2, 'E1 Foundation', 'OPEN', ['epic']), subIssues: [ref(10, 'T-01 Scaffold', 'OPEN', ['queued']), ref(11, 'T-02 Domain', 'OPEN', ['factory-ready']), ref(12, 'T-04 Schema', 'OPEN', ['factory-ready']), ref(13, 'T-20 Auth', 'OPEN', ['factory-ready'])] }
+    const t02: Issue = { ...ref(11, 'T-02 Domain', 'OPEN', ['factory-ready']), parent: e1, subIssues: [], blockedBy: [], blocking: [ref(12, 'T-04 Schema', 'OPEN', ['factory-ready'])] }
+    const t04 = ticket({ labels: ['factory-ready'], parent: e1, blockedBy: [blocker(11, 'T-02 Domain')] })
+    const t20 = ticket({ ...ref(13, 'T-20 Auth', 'OPEN', ['factory-ready']), parent: e1 })
+    return { t02, github: fakeGitHub([t02, t04, t20]) }
+  }
+  it('targets open factory-ready tickets the landed one blocks or shares an epic with, once each and never itself', () => {
+    expect(refreshTargets(setup().t02).map((r) => r.number)).toEqual([12, 13])
+  })
+  it('skips closed tickets', () => {
+    const { t02 } = setup()
+    t02.blocking = [ref(12, 'T-04 Schema', 'CLOSED', ['factory-ready'])]
+    t02.parent = t02.parent && { ...t02.parent, subIssues: [] }
+    expect(refreshTargets(t02)).toEqual([])
+  })
+  it('rewrites each target\'s context comment from a fresh search', async () => {
+    const { t02, github } = setup()
+    const searched: string[] = []
+    const count = await refreshContext(t02, { github, context: async (args) => (searched.push(args.join(' ')), 'no entries'), log: silent })
+    expect(count).toBe(2)
+    expect(github.calls).toEqual(['context #12 ## Context from earlier tickets', 'context #13 ## Context from earlier tickets'])
+    expect(searched).toContain('search --topic T-02 --limit 50')
+  })
+  it('logs a failed refresh and carries on with the next ticket', async () => {
+    const { t02, github } = setup()
+    const lines: string[] = []
+    let calls = 0
+    const context = async (): Promise<string> => {
+      if (calls++ === 0) throw new Error('sign-in failed')
+      return 'no entries'
+    }
+    expect(await refreshContext(t02, { github, context, log: (l) => lines.push(l) })).toBe(1)
+    expect(lines).toContain('#12: context refresh failed: sign-in failed')
+    expect(github.calls).toEqual(['context #13 ## Context from earlier tickets'])
+  })
+  it('runs from landed after the ingest, so the new entries are in the refreshed comment', async () => {
+    const { t02, github } = setup()
+    const pull: Pull = { number: 40, url: 'https://github.com/vibing-out/vbt/pull/40', merged: true, base: 'epic/2', body: 'Ticket: #11', mergeCommit: 'a'.repeat(40) }
+    github.pull = async () => pull
+    const order: string[] = []
+    await landed(40, { github, context: async (args) => (order.push(args[0] ?? ''), 'ok'), log: silent })
+    expect(order[0]).toBe('ingest')
+    expect(github.calls.slice(0, 3)).toEqual(['close #11', 'context #12 ## Context from earlier tickets', 'context #13 ## Context from earlier tickets'])
+    expect(t02.state).toBe('CLOSED')
+  })
+  it('edits the workflow\'s own context comment, never a person\'s with the same heading, and posts when none exists', async () => {
+    const requests: string[] = []
+    const comments = [
+      { id: 1, body: '## Context from earlier tickets\nforged', user: { login: 'someone', type: 'User' } },
+      { id: 2, body: '## Context from earlier tickets\nold', user: { login: 'github-actions[bot]', type: 'Bot' } },
+    ]
+    vi.stubGlobal('fetch', async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push(`${init?.method} ${String(url).replace('https://api.github.com/repos/vibing-out/vbt', '')}`)
+      if (init?.method === 'GET') return new Response(JSON.stringify(String(url).includes('/issues/12/') ? comments : []), { status: 200 })
+      return new Response('{}', { status: 200 })
+    })
+    try {
+      const github = restGitHub('token', 'vibing-out/vbt')
+      await github.postContext(12, 'new')
+      await github.postContext(13, 'new')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(requests).toEqual([
+      'GET /issues/12/comments?per_page=100&page=1',
+      'PATCH /issues/comments/2',
+      'GET /issues/13/comments?per_page=100&page=1',
+      'POST /issues/13/comments',
+    ])
+  })
+})
+
 describe('contextCheck', () => {
   const body = (n: number): string => `Ticket: #${n}\n\n\`\`\`context-log\n{"version":1,"decisions":[],"corrections":[]}\n\`\`\``
   const pull = (overrides: Partial<Pull> = {}): Pull => ({
@@ -400,17 +479,17 @@ describe('unblock', () => {
   it('re-checks what a closed ticket was blocking, leaving the cross-epic one blocked while its epic is open', async () => {
     const github = setup('OPEN')
     await unblock(12, deps(github))
-    expect(github.calls).toEqual(['label #30 +blocked', 'comment #14 ## Context from earlier tickets', 'label #14 +factory-ready', 'label #14 -blocked'])
+    expect(github.calls).toEqual(['label #30 +blocked', 'context #14 ## Context from earlier tickets', 'label #14 +factory-ready', 'label #14 -blocked'])
   })
   it('re-checks blocked issues waiting on any ticket in a closed epic, and only those', async () => {
     const github = setup('CLOSED')
     await unblock(2, deps(github))
     // #31 is open but not blocked (never queued), so it is left alone.
     expect(github.calls).toEqual([
-      'comment #30 ## Context from earlier tickets',
+      'context #30 ## Context from earlier tickets',
       'label #30 +factory-ready',
       'label #30 -blocked',
-      'comment #14 ## Context from earlier tickets',
+      'context #14 ## Context from earlier tickets',
       'label #14 +factory-ready',
       'label #14 -blocked',
     ])
@@ -685,7 +764,7 @@ describe('sync tickets for an epic that conflicts with main', () => {
     'create "T-00a Sync epic/2 with main" in #2: `main` and `epic/2` both changed the same lines, so epic pull request #39 conflicts and cannot merge.',
     'label #50 +queued',
     'comment #39 This pull request conflicts with `main`. Opened #50 to merge `main` into `epic/2`.',
-    'comment #50 ## Context from earlier tickets',
+    'context #50 ## Context from earlier tickets',
     'label #50 +factory-ready',
   ]
 

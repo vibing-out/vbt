@@ -4,3 +4,4 @@ packages:
   - tools/*
   - scripts
   - supabase
+  - tests/load

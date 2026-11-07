@@ -3,7 +3,10 @@ import { expect, test } from "vitest";
 import { migrationFiles } from "../lib/db.ts";
 import { asRole, asRoleSteps, describeDb, useScratchDatabase } from "./support.ts";
 
-const TABLES = ["app_info", "ballot_events", "ballots", "batches", "machines", "precincts", "stage_records"];
+// ballots and ballot_events live in private, out of the Data API's reach (resolution 1).
+const PUBLIC_TABLES = ["app_info", "batches", "machines", "precincts", "stage_records"];
+const PRIVATE_TABLES = ["ballot_events", "ballots"];
+const TABLES = [...PUBLIC_TABLES.map((t) => `public.${t}`), ...PRIVATE_TABLES.map((t) => `private.${t}`)].sort();
 
 describeDb("migrations on an empty database", () => {
   const db = useScratchDatabase();
@@ -18,8 +21,15 @@ describeDb("migrations on an empty database", () => {
        join pg_namespace n on n.oid = c.relnamespace
        where n.nspname = 'public' and c.relkind in ('r', 'p', 'v') order by 1`,
     );
-    expect(rows.filter((r) => r.kind !== "v").map((r) => r.name)).toEqual(TABLES);
+    expect(rows.filter((r) => r.kind !== "v").map((r) => r.name)).toEqual(PUBLIC_TABLES);
     expect(rows.filter((r) => r.kind === "v").map((r) => r.name)).toEqual(["ballot_event_public", "ballot_public"]);
+
+    const priv = await db().query<{ name: string; kind: string }>(
+      `select c.relname as name, c.relkind as kind from pg_class c
+       join pg_namespace n on n.oid = c.relnamespace
+       where n.nspname = 'private' and c.relkind in ('r', 'p', 'v', 'm', 'f') order by 1`,
+    );
+    expect(priv.rows).toEqual(PRIVATE_TABLES.map((name) => ({ name, kind: "r" })));
   });
 
   test("keep the T-01 hello-world row readable by the public", async () => {
@@ -29,9 +39,9 @@ describeDb("migrations on an empty database", () => {
 
   test("enable row level security on every table", async () => {
     const { rows } = await db().query<{ name: string; rls: boolean }>(
-      `select c.relname as name, c.relrowsecurity as rls from pg_class c
+      `select n.nspname || '.' || c.relname as name, c.relrowsecurity as rls from pg_class c
        join pg_namespace n on n.oid = c.relnamespace
-       where n.nspname = 'public' and c.relkind in ('r', 'p') order by 1`,
+       where n.nspname in ('public', 'private') and c.relkind in ('r', 'p') order by 1`,
     );
     expect(rows.map((r) => r.name)).toEqual(TABLES);
     expect(rows.filter((r) => !r.rls)).toEqual([]);
@@ -72,7 +82,7 @@ describeDb("status and scope checks mirror @vbt/domain", () => {
     const { rowCount } = await asRole(
       db(),
       "service_role",
-      "update ballots set current_status = $1 where tracking_code = 'SEED-0001'",
+      "update private.ballots set current_status = $1 where tracking_code = 'SEED-0001'",
       [status],
     );
     expect(rowCount).toBe(1);
@@ -80,7 +90,7 @@ describeDb("status and scope checks mirror @vbt/domain", () => {
 
   test("a status outside the domain is rejected", async () => {
     await expect(
-      asRole(db(), "service_role", "update ballots set current_status = 'LOST' where tracking_code = 'SEED-0001'"),
+      asRole(db(), "service_role", "update private.ballots set current_status = 'LOST' where tracking_code = 'SEED-0001'"),
     ).rejects.toThrow(/ballots_current_status_check/);
   });
 
@@ -107,10 +117,10 @@ describeDb("no column stores voter identity", () => {
     "stage_records.signature", // the officials' cryptographic signature over a published record
   ]);
 
-  test("no column in the public schema matches the identity deny-list", async () => {
+  test("no column in the public or private schema matches the identity deny-list", async () => {
     const { rows } = await db().query<{ col: string }>(
       `select table_name || '.' || column_name as col from information_schema.columns
-       where table_schema = 'public' order by 1`,
+       where table_schema in ('public', 'private') order by 1`,
     );
     expect(rows.length).toBeGreaterThan(0);
     const flagged = rows.map((r) => r.col).filter((col) => IDENTITY.test(col.split(".")[1]!) && !ALLOWED.has(col));
@@ -120,7 +130,7 @@ describeDb("no column stores voter identity", () => {
   test("ballots holds exactly the locked columns", async () => {
     const { rows } = await db().query<{ column_name: string }>(
       `select column_name from information_schema.columns
-       where table_schema = 'public' and table_name = 'ballots' order by 1`,
+       where table_schema = 'private' and table_name = 'ballots' order by 1`,
     );
     expect(rows.map((r) => r.column_name)).toEqual(
       [

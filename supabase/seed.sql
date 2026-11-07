@@ -23,7 +23,7 @@ with numbered as (
     'seed-ciphertext-' || n as ciphertext
   from generate_series(1, 50) as n
 )
-insert into public.ballots (
+insert into private.ballots (
   tracking_code, prev_tracking_code, ciphertext, ciphertext_hash, ballot_style,
   precinct_id, machine_id, cast_date, current_status, mismatch
 )
@@ -40,7 +40,7 @@ select
   false
 from numbered;
 
-insert into public.ballot_events (
+insert into private.ballot_events (
   ballot_id, precinct_id, county_id, event_type, from_status, to_status,
   actor_role, actor_id, nist_event_code, occurred_at, prev_hash, hash
 )
@@ -57,5 +57,5 @@ select
   timestamptz '2026-11-03 12:00:00+00',
   null,
   encode(sha256(convert_to('CAST:' || b.tracking_code, 'UTF8')), 'hex')
-from public.ballots b
+from private.ballots b
 join public.precincts p on p.id = b.precinct_id;

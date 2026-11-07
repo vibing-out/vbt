@@ -20,6 +20,7 @@
     "@supabase/supabase-js": "2.119.0",
     "@vbt/domain": "workspace:*",
     "@vbt/ui": "workspace:*",
+    "@vercel/firewall": "^1.2.6",
     "flags": "^4.4.0",
     "next": "16.4.5",
     "react": "19.3.1",

@@ -33,11 +33,22 @@ export const BODY_LIMIT = 60_000 // GitHub rejects bodies over 65,536 characters
 
 type Section = { heading: string; level: number; lines: string[] }
 
+// Removes HTML comments until none remain, so nested input like `<!<!---->--` cannot leave one behind.
+const stripComments = (markdown: string): string => {
+  let prev: string
+  let out = markdown
+  do {
+    prev = out
+    out = out.replace(/<!--[\s\S]*?-->/g, '')
+  } while (out !== prev)
+  return out
+}
+
 // Splits markdown at headings outside code fences, after removing HTML comments.
 export function sections(markdown: string): Section[] {
   const out: Section[] = [{ heading: '', level: 0, lines: [] }]
   let fence = false
-  for (const line of markdown.replace(/<!--[\s\S]*?-->/g, '').split(/\r?\n/)) {
+  for (const line of stripComments(markdown).split(/\r?\n/)) {
     if (/^\s*(```|~~~)/.test(line)) fence = !fence
     const heading = fence ? null : /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line)
     if (heading) out.push({ heading: heading[2]!.trim(), level: heading[1]!.length, lines: [] })
@@ -54,7 +65,7 @@ const sectionText = (markdown: string, pattern: RegExp): string =>
 // defused outside code spans (an `@` inside backticks never mentions anyone, and an entity there would
 // show literally).
 export function quote(text: string, limit = ITEM_LIMIT): string {
-  const flat = text.replace(/```+/g, '').replace(/\s+/g, ' ').replace(/\|/g, '\\|').trim()
+  const flat = text.replace(/```+/g, '').replace(/\s+/g, ' ').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').trim()
   const cut = flat.length > limit ? `${flat.slice(0, limit - 1).trimEnd()}…` : flat
   return cut
     .split('`')

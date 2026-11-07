@@ -1,6 +1,7 @@
 // Links to a published stage record: the JSON (GET /api/record/{scope}/{stage}) and its entry on /record.
 // Shared by the tracker's stage links, the /record page and the route, so they never disagree.
-import { isRecordStage, isScopeId, type RecordStage } from "./types";
+import { isRecordStage, type RecordStage } from "@vbt/domain";
+import { isScopeId } from "./types";
 
 /** The record's JSON: the exact GET /api/record/{scope}/{stage} URL, where {scope} is the scope_id. */
 export function recordApiUrl(scopeId: string, stage: RecordStage): string {

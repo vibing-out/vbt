@@ -74,3 +74,5 @@ export {
   stageOrder,
   type TrackTimelineEntry,
 } from "./timeline.ts";
+
+export { isRecordStage, type RecordStage, STAGE_SCOPE } from "./record-stage.ts";

@@ -11,18 +11,16 @@ import "server-only";
 // record's stage in its precinct or county. If that list does not match the record's ballot_count
 // (say a scope published the same stage twice), the record is reported unavailable rather than
 // served with a wrong list. Never logs anything.
+import { isRecordStage, type RecordStage, STAGE_SCOPE } from "@vbt/domain";
 import { toIndianaDate } from "../track/dates";
 import {
   type ContestTotals,
-  isRecordStage,
   isScopeId,
   type PublishedBallot,
   type PublishedRecord,
   type PublishedRecordListing,
   type RecordScope,
-  type RecordStage,
   type RecordSummary,
-  STAGE_SCOPE,
 } from "./types";
 
 export interface RecordReadDeps {

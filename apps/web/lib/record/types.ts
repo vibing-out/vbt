@@ -2,20 +2,9 @@
 // (docs/locked-interfaces.md § API boundaries; the T-15 "Public JSON shapes" refinement on main).
 // `{scope}` in the path is the record's scope_id. Dates only: no field holds a time or a sequence,
 // and the ballot list is in ciphertext-hash order, never casting order.
-import type { BallotStatus } from "@vbt/domain";
+import { type BatchScope, type RecordStage, STAGE_SCOPE } from "@vbt/domain";
 
-export type RecordScope = "precinct" | "county";
-
-/** Each published stage and the scope it is batched per. */
-export const STAGE_SCOPE = {
-  TALLIED_PRECINCT: "precinct",
-  REPORTED_UNOFFICIAL: "county",
-  CERTIFIED: "county",
-  CHALLENGED: "county",
-  DISCARDED: "county",
-} as const satisfies Partial<Record<BallotStatus, RecordScope>>;
-
-export type RecordStage = keyof typeof STAGE_SCOPE;
+export type RecordScope = BatchScope;
 
 /** Display order on /record: the order a ballot moves through them. */
 export const RECORD_STAGES = Object.keys(STAGE_SCOPE) as RecordStage[];
@@ -54,10 +43,6 @@ export interface PublishedRecordListing {
 /** The full JSON body of GET /api/record/{scope}/{stage}. */
 export interface PublishedRecord extends RecordSummary {
   ballots: PublishedBallot[];
-}
-
-export function isRecordStage(value: unknown): value is RecordStage {
-  return typeof value === "string" && Object.hasOwn(STAGE_SCOPE, value);
 }
 
 export function isScopeId(value: unknown): value is string {

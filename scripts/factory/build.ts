@@ -5,8 +5,8 @@
 //   node scripts/factory/build.ts <issue> [--shadow]
 // --shadow works a ticket without `factory-ready` (a trial run on a ticket Warp isn't working); every other
 // addressing rule still applies.
-// Stages: triage -> spec -> implement -> review (up to MAX_REVIEW_ROUNDS, fixes go back to implement; one more
-// round when only low-severity fixes are left) ->
+// Stages: triage -> spec -> implement -> review (up to MAX_REVIEW_ROUNDS, fixes go back to implement; low-severity
+// fixes left after the last round are fixed and checked, not re-reviewed) ->
 // required checks -> squash merge -> dispatch.ts `landed` in-process. The prompts are
 // scripts/factory/prompts/<stage>.md; each gets the ticket and earlier stages' output appended as data.
 //
@@ -26,9 +26,6 @@ export const STAGES = ['triage', 'spec', 'implement', 'review'] as const
 export type Stage = (typeof STAGES)[number]
 export type Verdict = 'clean' | 'fixes' | 'needs-human'
 export const MAX_REVIEW_ROUNDS = 2
-// After MAX_REVIEW_ROUNDS, open fixes that are all low severity get one final fix-and-review round instead
-// of a stop for a person; low items still open after it merge, logged in the Review log.
-export const FINAL_LOW_ROUND = MAX_REVIEW_ROUNDS + 1
 export const MAX_PARALLEL_TICKETS = 2
 const NEEDS_HUMAN = 'needs-human'
 const WORKTREE = '/tmp/ticket'
@@ -79,19 +76,18 @@ export function reviewVerdict(text: string, report: { ok: boolean; verdict: stri
 }
 
 // The open unambiguous fixes in a checked review report, or null when the report failed its check (then its
-// severities can't be trusted, so it never earns the low-severity final round).
+// severities can't be trusted, so they are never fixed unreviewed).
 export function openFixes(checked: { errors: string[]; findings: { group: string; severity: string; status: string; text: string }[] }): { severity: string; text: string }[] | null {
   if (checked.errors.length) return null
   return checked.findings.filter((f) => f.group === 'Unambiguous fixes' && f.status === 'open').map((f) => ({ severity: f.severity, text: f.text }))
 }
 
-// What a review round with open fixes leads to. Before the cap: fix and review again. At the cap: one final
-// round when every open fix is low. After the final round: merge when what is left is low, else stop.
-export function afterFixes(round: number, fixes: { severity: string }[] | null): 'again' | 'final' | 'merge-low' | 'stop' {
-  const lowOnly = fixes !== null && fixes.length > 0 && fixes.every((f) => f.severity === 'low')
+// What a review round with open fixes leads to. Before the cap: fix and review again. At the cap (review is
+// capped at MAX_REVIEW_ROUNDS): when every open fix is low severity, implement fixes them and the required
+// checks must pass, but no review runs again; anything medium or high stops for a person.
+export function afterFixes(round: number, fixes: { severity: string }[] | null): 'again' | 'fix-unreviewed' | 'stop' {
   if (round < MAX_REVIEW_ROUNDS) return 'again'
-  if (round === MAX_REVIEW_ROUNDS) return lowOnly ? 'final' : 'stop'
-  return lowOnly ? 'merge-low' : 'stop'
+  return fixes !== null && fixes.length > 0 && fixes.every((f) => f.severity === 'low') ? 'fix-unreviewed' : 'stop'
 }
 
 // Saves the evidence the review prompt reads, since read-only Claude Code can't run commands. Arguments:
@@ -163,8 +159,8 @@ export type BodyParts = {
   rounds: Round[]
   decisions: { text: string }[]
   runUrl: string
-  // Low-severity fixes still open after the final round, merged anyway and listed for a follow-up.
-  lowLeft?: string[]
+  // Low-severity fixes made after the last review round: checked by CI, not re-reviewed.
+  unreviewed?: string[]
 }
 
 // The pull request body: Ticket line, summary, results, review log, and the context-log block last.
@@ -181,7 +177,9 @@ export function prBody(p: BodyParts): string {
   const reviewLog = p.rounds.length
     ? p.rounds.map((r) => `- Round ${r.round}: ${r.verdict} ([findings](${r.commentUrl})) ${r.modelsLine}`).join('\n')
     : '- Not reviewed yet.'
-  const left = p.lowLeft?.length ? ['', 'Low-severity fixes left open after the final round (merged; worth a follow-up):', ...p.lowLeft.map((t) => `- ${t.replace(/\s+/g, ' ').trim()}`)] : []
+  const left = p.unreviewed?.length
+    ? ['', `Fixed after round ${MAX_REVIEW_ROUNDS}, not re-reviewed (low severity; the required checks passed):`, ...p.unreviewed.map((t) => `- ${t.replace(/\s+/g, ' ').trim()}`)]
+    : []
   return [
     `Ticket: #${p.ticket}`,
     '',
@@ -361,8 +359,8 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
     await comment(number, `## Plan\n\n${spec.text}\n\n${spec.modelsLine}`)
     if (verdict(spec.text) === NEEDS_HUMAN) await stopForHuman([number], 'the plan has items only a person can decide (see "Needs human" in the plan).')
 
-    // 6-7. Implement, then review; unambiguous fixes go back to implement, up to MAX_REVIEW_ROUNDS reviews, plus
-    // FINAL_LOW_ROUND when only low-severity fixes are open (see afterFixes).
+    // 6-7. Implement, then review; unambiguous fixes go back to implement, up to MAX_REVIEW_ROUNDS reviews. Low-
+    // severity fixes left after the last round are implemented and checked but not reviewed (see afterFixes).
     const rounds: Round[] = []
     const implementData = [
       { heading: 'Ticket', text: ticketText },
@@ -372,7 +370,7 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
     let findings = ''
     let summary = ''
     let checks = ''
-    let lowLeft: string[] = []
+    let unreviewed: string[] = [] // set once low-severity fixes go to implement after the last review round
     for (let round = 1; ; round++) {
       // Implement (or fix), with one retry when lint, type check or tests fail.
       for (let attempt = 1; ; attempt++) {
@@ -402,6 +400,8 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
       // (A push made with GITHUB_TOKEN starts no workflow, so the checks are dispatched here.)
       await github.dispatchWorkflow('ci.yml', branch)
       await github.dispatchWorkflow('factory.yml', branch, { pr: String(pr) })
+      // Low-severity fixes after the last round: the checks just dispatched gate the merge; no review runs.
+      if (unreviewed.length) break
       await comment(pr, `Review round ${round} started (Claude Code, Opus).`)
       await ok('sh', ['-c', EVIDENCE_SCRIPT, 'evidence', String(pr), `origin/${epicBranch}`], { cwd: WORKTREE })
       const review = await claude('review', [
@@ -438,22 +438,13 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
       if (v === 'clean') break
       const fixes = openFixes(checked)
       const next = afterFixes(round, fixes)
-      if (next === 'merge-low') {
-        lowLeft = fixes!.map((f) => f.text)
-        break
-      }
-      if (next === 'stop')
-        await stopForHuman(
-          [number, pr],
-          round === MAX_REVIEW_ROUNDS
-            ? `review still has medium or high fixes open after ${MAX_REVIEW_ROUNDS} rounds.`
-            : `the final round left fixes that are not all low severity.`,
-        )
+      if (next === 'stop') await stopForHuman([number, pr], `review still has medium or high fixes open after ${MAX_REVIEW_ROUNDS} rounds.`)
+      if (next === 'fix-unreviewed') unreviewed = fixes!.map((f) => f.text)
       findings = report
     }
 
     // 8. Record, then 9. checks and merge.
-    const finalBody = prBody({ ticket: number, summary, checks, modelsLines, rounds, decisions: decisions(spec.text), runUrl, lowLeft })
+    const finalBody = prBody({ ticket: number, summary, checks, modelsLines, rounds, decisions: decisions(spec.text), runUrl, unreviewed })
     await ok('node', ['scripts/context.ts', 'check'], { input: finalBody, cwd: REPO_ROOT })
     await ok('gh', ['pr', 'edit', String(pr), '--body-file', '-'], { input: finalBody })
     await ok('gh', ['pr', 'ready', String(pr)])

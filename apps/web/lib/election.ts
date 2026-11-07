@@ -43,3 +43,15 @@ export function loadElectionKeys(env: Env = process.env): ElectionKeys | null {
   if (!electionPublicKey || !electionSecretKey || !signingSecretKey) return null;
   return { electionPublicKey, electionSecretKey, signingSecretKey };
 }
+
+/**
+ * The Ed25519 public key that checks stage-record signatures: STAGE_SIGNING_PUBLIC_KEY, or else the
+ * public half of STAGE_SIGNING_SECRET_KEY (libsodium's 64-byte secret key is seed || public key).
+ * Null when neither is set.
+ */
+export function loadStageSigningPublicKey(env: Env = process.env): Uint8Array | null {
+  const publicKey = decodeKey(env.STAGE_SIGNING_PUBLIC_KEY, 32);
+  if (publicKey) return publicKey;
+  const secretKey = decodeKey(env.STAGE_SIGNING_SECRET_KEY, 64);
+  return secretKey ? secretKey.slice(32) : null;
+}

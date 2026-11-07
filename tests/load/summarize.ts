@@ -27,7 +27,7 @@ export interface LoadResults {
   runDate: string;
   k6Version: string;
   target: string;
-  nastyLimitsEmulated: false;
+  nanoLimitsEmulated: false;
   tested: { trackRatePerSecond: number; recordRatePerSecond: number; duration: string };
   endpoints: Record<Endpoint, EndpointResult>;
   thresholdsPassed: boolean;
@@ -84,7 +84,7 @@ export function summarize(data: K6SummaryData, meta: RunMeta): LoadResults {
     runDate: runDate(meta.now),
     k6Version: k6Version(meta.k6Version),
     target: TARGET_DESCRIPTION,
-    nastyLimitsEmulated: false,
+    nanoLimitsEmulated: false,
     tested: { trackRatePerSecond: meta.trackRate, recordRatePerSecond: meta.recordRate, duration: meta.duration },
     endpoints: {
       track: endpointResult(data, "track"),

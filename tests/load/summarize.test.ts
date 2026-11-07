@@ -40,7 +40,7 @@ describe("summarize", () => {
       runDate: "2026-11-07",
       k6Version: "v1.4.2",
       target: expect.stringContaining("local Supabase stack"),
-      nastyLimitsEmulated: false,
+      nanoLimitsEmulated: false,
       tested: { trackRatePerSecond: 50, recordRatePerSecond: 5, duration: "5m" },
       endpoints: {
         track: { requests: 15000, medianMs: 41.2, p95Ms: 180.6, p99Ms: 320, errorRate: 0.002, rateLimitedRate: 0.011 },

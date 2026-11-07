@@ -13,10 +13,15 @@ describe("buildOptions defaults", () => {
         timeUnit: "1s",
         duration: "5m",
         preAllocatedVUs: 50,
-        maxVUs: 150,
+        maxVUs: 75,
         exec: name,
       });
     }
+  });
+
+  it("caps the run at 150 VUs in total across both scenarios", () => {
+    const total = Object.values(options.scenarios).reduce((sum, s) => sum + s.maxVUs, 0);
+    expect(total).toBe(150);
   });
 
   it("sets the pass criteria as thresholds", () => {
@@ -46,11 +51,29 @@ describe("env overrides", () => {
     expect(options.scenarios.record).toMatchObject({ rate: 12, duration: "1m30s" });
   });
 
+  it("applies MAX_VUS to each scenario", () => {
+    const options = buildOptions({ MAX_VUS: "120" });
+    for (const s of Object.values(options.scenarios)) expect(s).toMatchObject({ maxVUs: 120, preAllocatedVUs: 50 });
+  });
+
+  it("lowers preAllocatedVUs with a MAX_VUS below it, as k6 requires", () => {
+    const options = buildOptions({ MAX_VUS: "20" });
+    for (const s of Object.values(options.scenarios)) expect(s).toMatchObject({ maxVUs: 20, preAllocatedVUs: 20 });
+  });
+
   it("treats empty values as unset", () => {
-    expect(settings({ TRACK_RATE: "", RECORD_RATE: "", DURATION: "" })).toMatchObject({
+    expect(
+      settings({ TRACK_RATE: "", RECORD_RATE: "", DURATION: "", MAX_VUS: "", RECORD_SCOPES: "", RECORD_STAGE: "" }),
+    ).toMatchObject({
       trackRate: 50,
       recordRate: 5,
       duration: "5m",
+      maxVUs: 75,
+      recordTargets: [
+        { scope: "18097-001", stage: "TALLIED_PRECINCT" },
+        { scope: "18097-002", stage: "TALLIED_PRECINCT" },
+        { scope: "18057-001", stage: "TALLIED_PRECINCT" },
+      ],
     });
   });
 
@@ -61,6 +84,10 @@ describe("env overrides", () => {
     { RECORD_RATE: "fast" },
     { DURATION: "5" },
     { DURATION: "five minutes" },
+    { MAX_VUS: "0" },
+    { MAX_VUS: "many" },
+    { RECORD_SCOPES: "18097-001,,18057-001" },
+    { RECORD_SCOPES: "18097-001, " },
     { BASE_URL: "localhost:3000" },
     { BASE_URL: "http://localhost:3000/api" },
   ])("rejects invalid %o", (env) => {

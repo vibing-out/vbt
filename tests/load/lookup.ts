@@ -4,10 +4,21 @@
 import http from "k6/http";
 import exec from "k6/execution";
 import { Rate } from "k6/metrics";
-import { buildOptions, isExpectedStatus, isRateLimited, METRICS, NAME_TAGS, pathFor, settings, type Endpoint } from "./config.ts";
+import {
+  buildOptions,
+  isExpectedStatus,
+  isRateLimited,
+  METRICS,
+  NAME_TAGS,
+  pathFor,
+  requestPaths,
+  settings,
+  type Endpoint,
+} from "./config.ts";
 import { summarize } from "./summarize.ts";
 
 const run = settings(__ENV);
+const paths = requestPaths(run);
 export const options = buildOptions(__ENV);
 
 // 429 from the /api/track rate limiter is expected, so it doesn't count toward http_req_failed;
@@ -22,7 +33,7 @@ const limitedBy = {
 };
 
 function lookup(endpoint: Endpoint) {
-  const path = pathFor(endpoint, exec.scenario.iterationInTest);
+  const path = pathFor(paths, endpoint, exec.scenario.iterationInTest);
   const res = http.get(`${run.baseUrl}${path}`, { tags: { endpoint, name: NAME_TAGS[endpoint] } });
   const limited = isRateLimited(res.status);
   rateLimited.add(limited);

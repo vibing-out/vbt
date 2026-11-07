@@ -11,7 +11,11 @@ export const DEFAULTS = {
   recordRate: 5,
   duration: "5m",
   preAllocatedVUs: 50,
-  maxVUs: 150,
+  /** Per scenario; two scenarios cap the run at 150 VUs in total. */
+  maxVUs: 75,
+  /** The three precincts in supabase/seed.sql. */
+  recordScopes: ["18097-001", "18097-002", "18057-001"],
+  recordStage: "TALLIED_PRECINCT",
 } as const;
 
 /** p95 budget for a successful lookup, from ticket #24's acceptance criteria. */
@@ -47,11 +51,27 @@ export function baseUrl(env: Env): string {
   return raw;
 }
 
-function positiveInt(env: Env, name: string, fallback: number): number {
+function positiveInt(env: Env, name: string, fallback: number, unit: string): number {
   const raw = env[name];
   if (raw === undefined || raw === "") return fallback;
-  if (!/^\d+$/.test(raw) || Number(raw) <= 0) throw new Error(`${name} must be a positive whole number of requests per second`);
+  if (!/^\d+$/.test(raw) || Number(raw) <= 0) throw new Error(`${name} must be a positive whole number of ${unit}`);
   return Number(raw);
+}
+
+// Path template values for /api/record/{scope}/{stage}. Overridable so the script follows the scope and
+// stage shapes later tickets add to docs/locked-interfaces.md without a code change. Only emptiness is
+// checked; recordPath URL-encodes whatever is given.
+function recordScopes(env: Env): readonly string[] {
+  const raw = env.RECORD_SCOPES;
+  if (raw === undefined || raw.trim() === "") return DEFAULTS.recordScopes;
+  const scopes = raw.split(",").map((scope) => scope.trim());
+  if (scopes.some((scope) => scope === "")) throw new Error("RECORD_SCOPES must be a comma-separated list with no empty entries");
+  return scopes;
+}
+
+function recordStage(env: Env): string {
+  const raw = env.RECORD_STAGE?.trim();
+  return raw === undefined || raw === "" ? DEFAULTS.recordStage : raw;
 }
 
 function duration(env: Env): string {
@@ -66,25 +86,36 @@ export interface Settings {
   trackRate: number;
   recordRate: number;
   duration: string;
+  maxVUs: number;
+  recordTargets: readonly RecordTarget[];
+}
+
+export interface RecordTarget {
+  scope: string;
+  stage: string;
 }
 
 export function settings(env: Env): Settings {
+  const stage = recordStage(env);
   return {
     baseUrl: baseUrl(env),
-    trackRate: positiveInt(env, "TRACK_RATE", DEFAULTS.trackRate),
-    recordRate: positiveInt(env, "RECORD_RATE", DEFAULTS.recordRate),
+    trackRate: positiveInt(env, "TRACK_RATE", DEFAULTS.trackRate, "requests per second"),
+    recordRate: positiveInt(env, "RECORD_RATE", DEFAULTS.recordRate, "requests per second"),
     duration: duration(env),
+    maxVUs: positiveInt(env, "MAX_VUS", DEFAULTS.maxVUs, "VUs per scenario"),
+    recordTargets: recordScopes(env).map((scope) => ({ scope, stage })),
   };
 }
 
-function scenario(rate: number, runFor: string, exec: Endpoint) {
+function scenario(rate: number, s: Settings, exec: Endpoint) {
   return {
     executor: "constant-arrival-rate" as const,
     rate,
     timeUnit: "1s",
-    duration: runFor,
-    preAllocatedVUs: DEFAULTS.preAllocatedVUs,
-    maxVUs: DEFAULTS.maxVUs,
+    duration: s.duration,
+    // k6 rejects preAllocatedVUs above maxVUs, so a lower MAX_VUS lowers it too.
+    preAllocatedVUs: Math.min(DEFAULTS.preAllocatedVUs, s.maxVUs),
+    maxVUs: s.maxVUs,
     exec,
   };
 }
@@ -94,8 +125,8 @@ export function buildOptions(env: Env) {
   const s = settings(env);
   return {
     scenarios: {
-      track: scenario(s.trackRate, s.duration, "track"),
-      record: scenario(s.recordRate, s.duration, "record"),
+      track: scenario(s.trackRate, s, "track"),
+      record: scenario(s.recordRate, s, "record"),
     },
     thresholds: {
       [METRICS.duration200("track")]: [`p(95)<${P95_BUDGET_MS}`],
@@ -108,12 +139,8 @@ export function buildOptions(env: Env) {
 }
 
 // Test data: the 50 synthetic ballots in supabase/seed.sql (SEED-0001 .. SEED-0050, three precincts).
+// The record targets default to its precincts at TALLIED_PRECINCT (DEFAULTS, overridable in settings).
 export const SEED_CODES: readonly string[] = Array.from({ length: 50 }, (_, i) => `SEED-${String(i + 1).padStart(4, "0")}`);
-export const RECORD_TARGETS: readonly { scope: string; stage: string }[] = [
-  { scope: "18097-001", stage: "TALLIED_PRECINCT" },
-  { scope: "18097-002", stage: "TALLIED_PRECINCT" },
-  { scope: "18057-001", stage: "TALLIED_PRECINCT" },
-];
 
 export const trackPath = (code: string) => `/api/track/${encodeURIComponent(code)}`;
 export const recordPath = (scope: string, stage: string) =>
@@ -125,14 +152,21 @@ export const NAME_TAGS: Readonly<Record<Endpoint, string>> = {
   record: "/api/record/{scope}/{stage}",
 };
 
-export const TRACK_PATHS: readonly string[] = SEED_CODES.map(trackPath);
-export const RECORD_PATHS: readonly string[] = RECORD_TARGETS.map((t) => recordPath(t.scope, t.stage));
+export type RequestPaths = Readonly<Record<Endpoint, readonly string[]>>;
 
-/** Round-robin over the paths, so every iteration picks a deterministic target. */
-export function pathFor(endpoint: Endpoint, iteration: number): string {
-  const paths = endpoint === "track" ? TRACK_PATHS : RECORD_PATHS;
-  const index = ((Math.trunc(iteration) % paths.length) + paths.length) % paths.length;
-  return paths[index] as string;
+/** Every path a run requests, per endpoint. */
+export function requestPaths(s: Pick<Settings, "recordTargets">): RequestPaths {
+  return {
+    track: SEED_CODES.map(trackPath),
+    record: s.recordTargets.map((t) => recordPath(t.scope, t.stage)),
+  };
+}
+
+/** Round-robin over the endpoint's paths, so every iteration picks a deterministic target. */
+export function pathFor(paths: RequestPaths, endpoint: Endpoint, iteration: number): string {
+  const list = paths[endpoint];
+  const index = ((Math.trunc(iteration) % list.length) + list.length) % list.length;
+  return list[index] as string;
 }
 
 /** Same rule as lookup.ts's setResponseCallback: 2xx/3xx, and 429 from the /api/track rate limiter, are expected. */

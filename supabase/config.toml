@@ -1,0 +1,12 @@
+# Minimal Supabase CLI config for local development (`supabase start`, `supabase db reset`).
+# Production schema changes ship only through supabase/migrations via CI (`supabase db push`, no seed).
+project_id = "vbt"
+
+[db]
+port = 54322
+major_version = 17
+
+[db.seed]
+# Local and test databases only; `supabase db push` does not run it.
+enabled = true
+sql_paths = ["./seed.sql"]

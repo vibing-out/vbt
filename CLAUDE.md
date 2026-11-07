@@ -53,6 +53,7 @@ The context log is an insert-only table in the Supabase project `vbt-context-log
 
 ## While working and when finishing
 
+- Build only against `docs/locked-interfaces.md`, the repo copy of the playbook's Locked interfaces. The voter journey and receipt mockup are in `docs/voter-journey.md`.
 - Every pull request includes tests. Ticket CI must finish within 5 minutes.
 - Domain logic lives only in `packages/domain`, crypto only in `packages/crypto`.
 - Never hand-edit an agent's code in a factory pull request. Reject it and have it regenerated.

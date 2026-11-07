@@ -243,7 +243,7 @@ export function syncBody(epicNumber: number, pull: EpicPull): string {
     'It merges with a merge commit, never a squash: a squash drops main\'s history from the epic branch, and the same conflict comes back.',
     '',
     '## Acceptance criteria',
-    `- The pull request's head is a merge commit whose parents are \`origin/epic/${epicNumber}\` and \`origin/main\`.`,
+    `- The branch holds a merge commit of \`origin/main\` into \`origin/epic/${epicNumber}\` (\`git merge-base --is-ancestor origin/main HEAD\` passes).`,
     '- `pnpm lint`, `pnpm typecheck` and `pnpm test` pass on it.',
     `- Once it merges, #${pull.number} no longer conflicts with \`main\`.`,
   ].join('\n')

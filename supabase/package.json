@@ -1,0 +1,24 @@
+{
+  "name": "@vbt/supabase",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "db:apply": "node scripts/apply.ts",
+    "seed:demo-officials": "node scripts/seed-demo-officials.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@supabase/supabase-js": "2.119.0",
+    "@types/node": "24.10.1",
+    "@types/pg": "8.23.1",
+    "@vbt/domain": "workspace:*",
+    "otpauth": "9.6.0",
+    "pg": "8.23.1",
+    "typescript": "5.9.3",
+    "vitest": "5.1.0"
+  }
+}

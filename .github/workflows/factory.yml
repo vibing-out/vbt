@@ -6,7 +6,9 @@
 #   unblock        an issue closes: re-check the blocked issues it held back (for an epic, those waiting on any of its tickets)
 #   context-check  a pull request into epic/* or main opens or changes: its body needs one valid context-log block
 #                  (a required check), and an epic/* one also needs one `Ticket: #n` line naming an open ticket; `landed` also dispatches it
-#                  (workflow_dispatch, input `pr`) on an epic branch whose head GITHUB_TOKEN merged, which starts no workflow
+#                  (workflow_dispatch, input `pr`) on an epic branch whose head GITHUB_TOKEN merged, which starts no workflow.
+#                  On a merge queue entry (merge_group) it checks the queued pull request, read from the entry's ref,
+#                  so the body `landed` logs is valid at merge time. No other job runs on merge_group.
 #   notify         an issue gets `needs-human` (from a person or Warp's GitHub app): post it to the team Slack channel.
 #                  `landed` adds `needs-human` with GITHUB_TOKEN, which starts no workflow, so it posts in-process.
 #   sync-check     main moves (a push to main): each open epic pull request that now conflicts with main gets a
@@ -42,6 +44,11 @@ on:
         description: Pull request number to check
         required: true
         type: number
+  # The merge queue on main needs the required `context-check` on each queue entry. Every other job's `if`
+  # names its own event, so a merge_group event runs context-check alone. `landed` still runs once per
+  # pull request, on the `pull_request: closed` event GitHub sends when the queue merges it.
+  merge_group:
+    types: [checks_requested]
 
 permissions:
   issues: write
@@ -128,7 +135,7 @@ jobs:
         run: node scripts/factory/dispatch.ts unblock "$ISSUE"
 
   context-check:
-    if: (github.event_name == 'pull_request' && github.event.action != 'closed') || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'pull_request' && github.event.action != 'closed') || github.event_name == 'workflow_dispatch' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -141,7 +148,10 @@ jobs:
       - env:
           GITHUB_TOKEN: ${{ github.token }}
           PR: ${{ github.event_name == 'workflow_dispatch' && inputs.pr || github.event.pull_request.number }}
-        run: node scripts/factory/dispatch.ts context-check "$PR"
+          QUEUE_REF: ${{ github.event.merge_group.head_ref }}
+        run: |
+          if [ -n "$QUEUE_REF" ]; then PR=$(node scripts/factory/merge-group.ts "$QUEUE_REF"); fi
+          node scripts/factory/dispatch.ts context-check "$PR"
 
   notify:
     if: github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'needs-human'
@@ -187,6 +197,12 @@ jobs:
     # One at a time, so two quick pushes to main can't open two sync tickets for the same epic.
     concurrency:
       group: factory-sync-check
+    # pull-requests: write to comment the sync ticket's link on the epic pull request (an issue comment on a
+    # pull request needs it); issues: write to open and queue the sync ticket.
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

@@ -1,0 +1,23 @@
+# Paths where a mistake breaks an election invariant (CLAUDE.md) or weakens the pipeline that checks them.
+# With "Require review from Code Owners" on in the main and epic rulesets, a pull request that touches any
+# of these waits for Shawn's or Austin's approval instead of auto-merging. Everything else still auto-merges.
+# GitHub reads this file from the pull request's base branch, so an epic picks it up when it syncs with main.
+
+# Data layer: schema, row-level security, insert-only history
+/supabase/migrations/         @trouta23 @hoosierplew
+/supabase/seed.sql            @trouta23 @hoosierplew
+
+# Ballot encryption, hash chains, signed stage records, independent verifier
+/packages/crypto/             @trouta23 @hoosierplew
+/packages/events/             @trouta23 @hoosierplew
+/tools/verifier/              @trouta23 @hoosierplew
+
+# Locked contracts and the rules agents follow
+/docs/locked-interfaces.md    @trouta23 @hoosierplew
+/CLAUDE.md                    @trouta23 @hoosierplew
+/AGENTS.md                    @trouta23 @hoosierplew
+/.claude/                     @trouta23 @hoosierplew
+
+# The factory itself: CI, scanning, review prompts, dispatch
+/.github/                     @trouta23 @hoosierplew
+/scripts/factory/             @trouta23 @hoosierplew

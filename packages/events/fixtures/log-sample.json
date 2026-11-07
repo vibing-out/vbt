@@ -1,0 +1,32 @@
+{
+  "@type": "EventLogging.ElectionEventLog",
+  "GeneratedTime": "2026-11-03T19:05:00-05:00",
+  "ElectionId": "2026-general",
+  "Device": [
+    {
+      "@type": "EventLogging.Device",
+      "Id": "M-001-A",
+      "Type": "bmd",
+      "Manufacturer": "VotingWorks",
+      "Model": "vx-mark-scan",
+      "Event": [
+        { "@type": "EventLogging.Event", "Id": "polls-opened", "Sequence": "1", "TimeStamp": "2026-11-03T06:00:00-05:00", "Type": "user-action", "Disposition": "success" },
+        { "@type": "EventLogging.Event", "Id": "vote-cast", "Sequence": "2", "TimeStamp": "2026-11-03T06:10:00-05:00", "Type": "user-action", "Disposition": "success" },
+        { "@type": "EventLogging.Event", "Id": "vote-cast", "Sequence": "3", "TimeStamp": "2026-11-03T06:20:00-05:00", "Type": "user-action", "Disposition": "success" },
+        { "@type": "EventLogging.Event", "Id": "vote-cast", "Sequence": "4", "TimeStamp": "2026-11-03T06:30:00-05:00", "Type": "user-action", "Disposition": "failure", "Details": "paper jam & retry" },
+        { "@type": "EventLogging.Event", "Id": "ballot-invalidated", "Sequence": "5", "TimeStamp": "2026-11-03T06:40:00-05:00", "Type": "user-action", "Disposition": "success" },
+        { "@type": "EventLogging.Event", "Id": "diagnostic-error", "Sequence": "6", "TimeStamp": "2026-11-03T07:00:00-05:00", "Type": "user-action", "Disposition": "other" },
+        { "@type": "EventLogging.Event", "Id": "polls-closed", "Sequence": "7", "TimeStamp": "2026-11-03T18:00:00-05:00", "Type": "user-action", "Disposition": "success" }
+      ]
+    },
+    {
+      "@type": "EventLogging.Device",
+      "Id": "M-001-B",
+      "Type": "bmd",
+      "Event": [
+        { "@type": "EventLogging.Event", "Id": "polls-opened", "Sequence": "1", "TimeStamp": "2026-11-03T06:00:00-05:00", "Type": "user-action", "Disposition": "success" },
+        { "@type": "EventLogging.Event", "Id": "vote-cast", "Sequence": "2", "TimeStamp": "2026-11-03T06:15:00-05:00", "Type": "user-action", "Disposition": "success" }
+      ]
+    }
+  ]
+}

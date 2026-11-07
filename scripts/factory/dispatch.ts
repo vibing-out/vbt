@@ -7,13 +7,17 @@
 //   node scripts/factory/dispatch.ts context-check <pr>    on epic/* and main pull requests: validate the body
 //   node scripts/factory/dispatch.ts notify <issue>        on `needs-human`: post the issue to the team Slack channel
 //   node scripts/factory/dispatch.ts resume <issue>        on `needs-human` removed by a person: re-queue it with `check`
+//   node scripts/factory/dispatch.ts followup <issue> <title>  by the Foreman, body on stdin: open a follow-up ticket
+//                                                          in the same epic, blocked by <issue>, and queue it
 // Reads GITHUB_TOKEN and GITHUB_REPOSITORY (owner/name) from the environment, and SLACK_WEBHOOK_URL for
 // `notify` and `landed` (unset or empty means no Slack post). `check`, `landed` and `resume` call scripts/context.ts,
 // which reads its own sign-in variables (see that file).
 import { spawn } from 'node:child_process'
+import { text } from 'node:stream/consumers'
 import { fileURLToPath } from 'node:url'
 
-const USAGE = 'usage: node dispatch.ts <check <issue> | landed <pr> | unblock <issue> | context-check <pr> | notify <issue> | resume <issue>>'
+const USAGE =
+  'usage: node dispatch.ts <check <issue> | landed <pr> | unblock <issue> | context-check <pr> | notify <issue> | resume <issue> | followup <issue> <title> (body on stdin)>'
 const CONTEXT_TS = fileURLToPath(new URL('../context.ts', import.meta.url))
 const COMMENT_LIMIT = 60_000 // GitHub rejects comments over 65,536 characters
 const NEEDS_HUMAN = 'needs-human'
@@ -64,6 +68,8 @@ export interface GitHub {
   // Starts a workflow_dispatch run of `.github/workflows/<file>` on `ref`. Dispatches made with GITHUB_TOKEN
   // still start runs, unlike pushes, so this is how the epic branch's required checks run after update-branch.
   dispatchWorkflow(file: string, ref: string, inputs?: Record<string, string>): Promise<void>
+  // Opens an issue as a sub-issue of `epic`, blocked by `blockedBy`; resolves to its number.
+  createSubIssue(input: { title: string; body: string; epic: number; blockedBy: number }): Promise<number>
 }
 
 // Runs scripts/context.ts with these arguments and this standard input; resolves to its stdout.
@@ -119,10 +125,21 @@ export function resumeSkipReason(issue: Issue, removedBy: Actor | null): string 
   return null
 }
 
-// The ticket id at the start of an issue title ("T-02 Domain package" -> "T-02"), used as the
-// context log's topic.
+// The ticket id at the start of an issue title ("T-02 Domain package" -> "T-02", a follow-up
+// "T-04a Judgment fixes" -> "T-04a"), used as the context log's topic.
 export function ticketId(title: string): string | null {
-  return /^([A-Z]+-\d+)\b/.exec(title.trim())?.[1] ?? null
+  return /^([A-Z]+-\d+[a-z]?)\b/.exec(title.trim())?.[1] ?? null
+}
+
+// The id for the next follow-up to a ticket: its base id plus the first letter no sibling uses
+// ("T-04" with "T-04a" taken -> "T-04b"). A follow-up to a follow-up continues the same series.
+export function followupId(original: string, siblings: string[]): string {
+  const id = ticketId(original)
+  if (!id) throw new Error(`"${original}" does not start with a ticket id`)
+  const base = id.replace(/[a-z]$/, '')
+  const taken = new Set(siblings.map(ticketId))
+  for (const letter of 'abcdefghijklmnopqrstuvwxyz') if (!taken.has(`${base}${letter}`)) return `${base}${letter}`
+  throw new Error(`${base} has no follow-up letters left`)
 }
 
 // The issue number from the "Ticket: #n" line of a pull request body. Exactly one distinct number.
@@ -401,6 +418,26 @@ export async function contextCheck(number: number, deps: Deps): Promise<void> {
   log(await context(['check'], pr.body))
 }
 
+// Work a ticket needs after it closed gets a ticket of its own, so it shows on the epic: a sub-issue of
+// the same epic, blocked by the original, labeled `queued` last so `check` sees both links and
+// dispatches it like any other ticket. Resolves to the new issue's number.
+export async function followup(number: number, title: string, body: string, deps: Deps): Promise<number> {
+  const { github, log = console.log } = deps
+  const original = await github.issue(number)
+  if (!original.parent) throw new Error(`#${number} has no parent epic, so a follow-up would not show on one`)
+  if (!title.trim()) throw new Error('a follow-up needs a title')
+  const id = followupId(original.title, original.parent.subIssues.map((s) => s.title))
+  const created = await github.createSubIssue({
+    title: `${id} ${title.trim()}`,
+    body: `Follow-up to #${number} (${original.title}).\n\n${body.trim()}`.trim(),
+    epic: original.parent.number,
+    blockedBy: number,
+  })
+  await github.addLabels(created, ['queued'])
+  log(`#${created}: ${id}, follow-up to #${number} in epic #${original.parent.number}, queued`)
+  return created
+}
+
 // The webhook URL inside whatever was pasted into the secret: people paste quotes, whitespace, or the
 // whole `curl ...` example Slack shows. Returns null when no Slack webhook URL is present.
 export function webhookUrl(secret: string | undefined): string | null {
@@ -603,6 +640,14 @@ export function restGitHub(token: string, repository: string): GitHub {
     async dispatchWorkflow(file, ref, inputs) {
       await call('POST', `/repos/${owner}/${name}/actions/workflows/${encodeURIComponent(file)}/dispatches`, { ref, ...(inputs && { inputs }) })
     },
+    async createSubIssue({ title, body, epic, blockedBy }) {
+      // The sub-issue and dependency endpoints take issue ids, not numbers.
+      const created = (await call('POST', issues, { title, body })) as { id: number; number: number }
+      await call('POST', `${issues}/${epic}/sub_issues`, { sub_issue_id: created.id })
+      const blocker = (await call('GET', `${issues}/${blockedBy}`)) as { id: number }
+      await call('POST', `${issues}/${created.number}/dependencies/blocked_by`, { issue_id: blocker.id })
+      return created.number
+    },
   }
 }
 
@@ -624,7 +669,7 @@ export const runContext: ContextLog = (args, input) =>
 if (import.meta.main) {
   const [command, arg, ...extra] = process.argv.slice(2)
   try {
-    if (!arg || !/^\d+$/.test(arg) || extra.length) throw new Error(USAGE)
+    if (!arg || !/^\d+$/.test(arg) || (extra.length && command !== 'followup')) throw new Error(USAGE)
     const token = process.env.GITHUB_TOKEN
     if (!token) throw new Error('GITHUB_TOKEN is not set')
     const deps: Deps = {
@@ -638,6 +683,7 @@ if (import.meta.main) {
     else if (command === 'context-check') await contextCheck(Number(arg), deps)
     else if (command === 'notify') await notify(Number(arg), deps)
     else if (command === 'resume') await resume(Number(arg), deps)
+    else if (command === 'followup') await followup(Number(arg), extra.join(' '), await text(process.stdin), deps)
     else throw new Error(USAGE)
   } catch (err) {
     console.error(err instanceof Error ? err.message : err)

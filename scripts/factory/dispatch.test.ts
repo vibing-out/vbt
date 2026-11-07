@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  check, contextComment, resume, resumeSkipReason, epicReady, epicReadyMessage, landed, notify, readiness, restGitHub, slackMessage, slackText, ticketNumber, trimmed, unblock, webhookUrl,
+  check, contextComment, followup, followupId, ticketId, resume, resumeSkipReason, epicReady, epicReadyMessage, landed, notify, readiness, restGitHub, slackMessage, slackText, ticketNumber, trimmed, unblock, webhookUrl,
   type Actor, type Blocker, type EpicPull, type GitHub, type Issue, type IssueRef, type LabelNotice, type Pull,
 } from './dispatch.ts'
 
@@ -79,6 +79,10 @@ function fakeGitHub(
     },
     async dispatchWorkflow(file, ref, inputs) {
       calls.push(`dispatch ${file} on ${ref}${inputs ? ` ${JSON.stringify(inputs)}` : ''}`)
+    },
+    async createSubIssue({ title, body, epic, blockedBy }) {
+      calls.push(`create "${title}" in #${epic} blocked by #${blockedBy}: ${body.split('\n')[0]}`)
+      return 50
     },
   }
 }
@@ -306,6 +310,29 @@ describe('landed', () => {
     }
     await expect(landed(40, { github, context, log: silent })).rejects.toThrow(/ingestion failed for pull request #40/)
     expect(github.calls).toEqual(['comment #40 Context ingestion failed for this pull request; log it by hand.'])
+  })
+})
+
+describe('follow-up tickets', () => {
+  it('reads a follow-up id from a title', () => {
+    expect(ticketId('T-04a Judgment fixes')).toBe('T-04a')
+    expect(ticketId('T-04 Schema')).toBe('T-04')
+  })
+  it('takes the first free letter, and continues the series from a follow-up', () => {
+    expect(followupId('T-04 Schema', ['T-02 Domain', 'T-04 Schema'])).toBe('T-04a')
+    expect(followupId('T-04 Schema', ['T-04 Schema', 'T-04a Fixes'])).toBe('T-04b')
+    expect(followupId('T-04a Fixes', ['T-04 Schema', 'T-04a Fixes'])).toBe('T-04b')
+  })
+  it('opens a sub-issue of the same epic, blocked by the original, then queues it', async () => {
+    const github = fakeGitHub([ticket({ state: 'CLOSED' })])
+    const created = await followup(12, ' Judgment fixes ', 'Fix the public views.', { github, context: async () => '', log: silent })
+    expect(created).toBe(50)
+    expect(github.calls).toEqual(['create "T-04a Judgment fixes" in #2 blocked by #12: Follow-up to #12 (T-04 Schema).', 'label #50 +queued'])
+  })
+  it('refuses a ticket with no parent epic', async () => {
+    const github = fakeGitHub([ticket({ parent: null })])
+    await expect(followup(12, 'Fixes', '', { github, context: async () => '', log: silent })).rejects.toThrow(/no parent epic/)
+    expect(github.calls).toEqual([])
   })
 })
 

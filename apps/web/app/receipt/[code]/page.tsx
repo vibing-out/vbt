@@ -1,5 +1,5 @@
 import { Button } from "@vbt/ui/components/button";
-import { Card, CardDescription, CardTitle } from "@vbt/ui/components/card";
+import { Card, CardDescription } from "@vbt/ui/components/card";
 import { Receipt } from "@vbt/ui/components/receipt";
 import { headers } from "next/headers";
 import Link from "next/link";
@@ -18,7 +18,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ code: 
     return (
       <TrackerShell>
         <Card>
-          <CardTitle>We couldn&apos;t find that code</CardTitle>
+          <h1 className="text-title text-ink">We couldn&apos;t find that code</h1>
           <CardDescription>Lost receipts can&apos;t be recovered, by design.</CardDescription>
           <Button asChild variant="secondary" className="w-full">
             <Link href="/track">Try another code</Link>

@@ -14,8 +14,8 @@ on:
   pull_request:
   push:
     branches: [main]
-  # Runs `check` on a branch's latest commit. dispatch.ts landed starts it on epic/<n> after updating the
-  # branch from main with GITHUB_TOKEN, a push that starts no workflow, so the required check still runs.
+  # Runs `check` on a branch's latest commit. dispatch.ts landed starts it on epic/<n> when marking it ready,
+  # since a merge made with GITHUB_TOKEN starts no workflow, so the required check still runs.
   workflow_dispatch:
 
 concurrency:

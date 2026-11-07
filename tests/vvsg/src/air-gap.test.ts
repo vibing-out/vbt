@@ -18,6 +18,7 @@ const OUTBOUND_ALLOWLIST: Record<string, string> = {
   "apps/web/lib/context-log.ts": "our own Supabase: the team's context-log project",
   "apps/web/lib/require-role.ts": "our own Supabase: Auth session, role and MFA check",
   "supabase/scripts/seed-demo-officials.ts": "our own Supabase: creates the demo officials (run by a human)",
+  "tools/verifier/src/cli.ts": "public verifier: read-only download of the published record from the --base-url a citizen gives",
 };
 
 const files = listSourceFiles(REPO, SCANNED_ROOTS);

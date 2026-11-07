@@ -135,6 +135,43 @@ No table holds a voter's name, ID, date of birth, or signature.
 | `GET /api/reports/mismatches` | Official | Supabase Auth | Mismatch list |
 | POST /api/sms/inbound | SMS provider webhook | Provider signature | Reply text; handles check, TRACK, YES, STOP, HELP |
 
+### Public JSON shapes (approved additive refinement, T-15)
+
+These shapes add detail to the two public rows above; they remove or rename nothing. All hashes, roots and signatures are lowercase hex. Dates are `YYYY-MM-DD` only, never a time. Neither response ever carries a ciphertext, a leaf index, a time or sequence, or any voter identity.
+
+`GET /api/record/{scope}/{stage}`: `{scope}` in the path is the record's `scope_id`; `stage` is `TALLIED_PRECINCT` (per precinct), or `REPORTED_UNOFFICIAL`, `CERTIFIED`, `CHALLENGED` or `DISCARDED` (per county). 404 means not published yet.
+
+```json
+{
+  "scope": "precinct | county",
+  "scope_id": "precinct-1",
+  "stage": "TALLIED_PRECINCT",
+  "merkle_root": "<64 hex>",
+  "ballot_count": 2500,
+  "totals": { "<contestId>": { "<choiceId>": 1234 } },
+  "published_on": "2026-11-03",
+  "signature": "<128 hex: Ed25519 over the stage record>",
+  "ballots": [{ "tracking_code": "RIVER-MAPLE-7Q4K-HAWK", "ciphertext_hash": "<64 hex>" }]
+}
+```
+
+- `ballots` is listed in ascending `ciphertext_hash` order, never in casting order. Merkle leaves are the 32 bytes of each `ciphertext_hash`, in that order, built with `buildMerkleTree` from `packages/crypto`.
+- `signature` is `signStageRecord({ scope: scope_id, stage, merkleRoot: merkle_root, ballotCount: ballot_count, totals })`. The signed `scope` is the `scope_id`.
+
+`GET /api/track/{code}`:
+
+```json
+{
+  "status": "CERTIFIED",
+  "ciphertext_hash": "<64 hex>",
+  "events": [{ "event_type": "CAST", "from_status": null, "to_status": "CAST", "date": "2026-11-03", "prev_hash": null, "hash": "<64 hex>" }],
+  "proofs": [{ "scope_id": "precinct-1", "stage": "TALLIED_PRECINCT", "path": [{ "side": "left | right", "hash": "<64 hex>" }] }]
+}
+```
+
+- `status` and `ciphertext_hash` are the locked row's status and ciphertext hash. `events` is the dated timeline, oldest first; the first event has `prev_hash: null`, and each later `prev_hash` is the previous event's `hash`.
+- `proofs` holds one inclusion proof for each published record that lists the code. `path` is the sibling hashes from the leaf up to the root, the steps of an `InclusionProof` without its `leafIndex`.
+
 ## Stack and repo layout (Proposed)
 
 Next.js (App Router) + TypeScript, Supabase, Vercel Flags SDK, libsodium, Vitest, Playwright, k6, pnpm workspaces.

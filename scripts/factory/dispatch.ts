@@ -11,15 +11,18 @@
 //                                                          in the same epic, blocked by <issue>, and queue it
 //   node scripts/factory/dispatch.ts sync-check            on a push to main: open a sync ticket for each open epic
 //                                                          pull request that now conflicts with main
+//   node scripts/factory/dispatch.ts rollup <epic>         when an epic pull request opens (and from `landed` at every
+//                                                          ticket landing): rewrite its description from its tickets
 // Reads GITHUB_TOKEN and GITHUB_REPOSITORY (owner/name) from the environment, and SLACK_WEBHOOK_URL for
 // `notify` and `landed` (unset or empty means no Slack post). `check`, `landed`, `resume` and `sync-check` call scripts/context.ts,
 // which reads its own sign-in variables (see that file).
 import { spawn } from 'node:child_process'
 import { text } from 'node:stream/consumers'
 import { fileURLToPath } from 'node:url'
+import { epicRollup, previewUrl, runLinks, type RollupPull, type RollupTicket } from './rollup.ts'
 
 const USAGE =
-  'usage: node dispatch.ts <check <issue> | landed <pr> | unblock <issue> | context-check <pr> | notify <issue> | resume <issue> | followup <issue> <title> (body on stdin) | sync-check>'
+  'usage: node dispatch.ts <check <issue> | landed <pr> | unblock <issue> | context-check <pr> | notify <issue> | resume <issue> | followup <issue> <title> (body on stdin) | sync-check | rollup <epic>>'
 const CONTEXT_TS = fileURLToPath(new URL('../context.ts', import.meta.url))
 const COMMENT_LIMIT = 60_000 // GitHub rejects comments over 65,536 characters
 const NEEDS_HUMAN = 'needs-human'
@@ -38,7 +41,13 @@ export type Issue = IssueRef & {
   blockedBy: Blocker[]
   blocking: IssueRef[]
 }
-export type Pull = { number: number; url: string; merged: boolean; base: string; body: string; mergeCommit: string | null }
+export type Pull = { number: number; url: string; author: string; merged: boolean; base: string; body: string; mergeCommit: string | null }
+
+// Dependabot writes its own descriptions and cannot add a `context-log` block, so its pull requests are
+// exempt, but only while the body has no block: a block that is present is still validated.
+export function exemptFromContextLog(pr: Pull): boolean {
+  return pr.author === 'dependabot[bot]' && !/^```context-log\b/m.test(pr.body)
+}
 // The open pull request from `epic/<n>` into `main`. `nodeId` is what GraphQL mutations take.
 export type EpicPull = { number: number; url: string; draft: boolean; nodeId: string; head: string }
 // What the Slack post needs about an issue that was labeled: who added the label (null when GitHub
@@ -80,6 +89,13 @@ export interface GitHub {
   dispatchWorkflow(file: string, ref: string, inputs?: Record<string, string>): Promise<void>
   // Opens an issue as a sub-issue of `epic`, blocked by `blockedBy` when given; resolves to its number.
   createSubIssue(input: { title: string; body: string; epic: number; blockedBy?: number }): Promise<number>
+  // An issue's body text.
+  issueBody(number: number): Promise<string>
+  // Every pull request merged into `base`, oldest first.
+  mergedPulls(base: string): Promise<Omit<RollupPull, 'runs'>[]>
+  // A pull request's current body, head commit and comments (authors are logins, null for a deleted account).
+  pullDetail(number: number): Promise<{ body: string; headSha: string; comments: { author: string | null; body: string }[] }>
+  editPullBody(number: number, body: string): Promise<void>
 }
 
 // Runs scripts/context.ts with these arguments and this standard input; resolves to its stdout.
@@ -387,11 +403,64 @@ export async function landed(number: number, deps: Deps): Promise<void> {
     // In-process, because closing with GITHUB_TOKEN does not start the `issues: closed` workflow.
     await unblock(ticket, deps)
   } finally {
-    // Both run even when a re-check fails, since this ticket's merge is done either way. Neither throws.
+    // These run even when a re-check fails, since this ticket's merge is done either way. None throws.
     await refreshContext(issue, deps)
     const epic = /^epic\/(\d+)$/.exec(pr.base)?.[1]
-    if (epic) await epicReady(Number(epic), deps)
+    if (epic) {
+      // The description first, so the epic pull request is current before it is marked ready.
+      await refreshRollup(Number(epic), deps)
+      await epicReady(Number(epic), deps)
+    }
     else log(`pull request #${number}: base ${pr.base} is not epic/<n>; skipped the epic readiness check`)
+  }
+}
+
+// Rewrites the epic pull request's description from the epic issue, its tickets and their merged pull requests
+// (see rollup.ts), keeping the hand-written Notes. Runs when the epic pull request opens and at every ticket
+// landing. Failures are logged, not thrown: a stale description must never block a merge or the readiness step.
+export async function refreshRollup(epicNumber: number, deps: Deps): Promise<'no-pull' | 'unchanged' | 'updated' | 'failed'> {
+  const { github, context, log = console.log } = deps
+  try {
+    const pull = await github.epicPull(epicNumber)
+    if (!pull) {
+      log(`epic #${epicNumber}: no open pull request from epic/${epicNumber} into main; no roll-up to write`)
+      return 'no-pull'
+    }
+    const epic = await github.issue(epicNumber)
+    const [detail, merged, epicBody] = await Promise.all([github.pullDetail(pull.number), github.mergedPulls(pull.head), github.issueBody(epicNumber)])
+    const byTicket = new Map<number, RollupPull[]>()
+    for (const p of merged) {
+      let n: number
+      try {
+        n = ticketNumber(p.body)
+      } catch {
+        continue // a pull request without one "Ticket: #n" line belongs to no ticket
+      }
+      // Warp posts its run links in comments, so those are read too.
+      const comments = (await github.pullDetail(p.number)).comments.map((c) => c.body).join('\n')
+      byTicket.set(n, [...(byTicket.get(n) ?? []), { ...p, runs: runLinks(`${p.body}\n${comments}`) }])
+    }
+    const tickets: RollupTicket[] = []
+    for (const sub of epic.subIssues)
+      tickets.push({ ...sub, body: await github.issueBody(sub.number), pulls: byTicket.get(sub.number) ?? [] })
+    const body = epicRollup({
+      epic: { number: epicNumber, title: epic.title, body: epicBody },
+      tickets,
+      pull: { number: pull.number, headSha: detail.headSha },
+      previewUrl: previewUrl(detail.comments),
+      previousBody: detail.body,
+    })
+    await context(['check'], body) // the same gate context-check applies; throws on a bad block
+    if (body === detail.body) {
+      log(`epic #${epicNumber}: roll-up on #${pull.number} is current`)
+      return 'unchanged'
+    }
+    await github.editPullBody(pull.number, body)
+    log(`epic #${epicNumber}: roll-up on #${pull.number} updated (${tickets.length} ticket(s), ${merged.length} merged pull request(s))`)
+    return 'updated'
+  } catch (err) {
+    log(`epic #${epicNumber}: roll-up failed: ${err instanceof Error ? err.message : err}`)
+    return 'failed'
   }
 }
 
@@ -490,6 +559,10 @@ export async function epicReady(
 // Nothing is closed or unblocked here: an epic's issue closes by hand or by "Closes" when it merges.
 async function landedOnMain(pr: Pull, number: number, deps: Deps): Promise<void> {
   const { github, context, log = console.log } = deps
+  if (exemptFromContextLog(pr)) {
+    log(`pull request #${number}: opened by dependabot[bot] with no context-log block, so nothing to ingest`)
+    return
+  }
   let topic = 'setup'
   try {
     topic = ticketId((await github.issue(ticketNumber(pr.body))).title) ?? 'setup'
@@ -561,6 +634,10 @@ export async function contextCheck(number: number, deps: Deps): Promise<void> {
       const ticket = await github.issue(n)
       if (ticket.state === 'CLOSED') throw new Error(closedTicketError(ticket))
     }
+  }
+  if (exemptFromContextLog(pr)) {
+    log(`pull request #${number}: opened by dependabot[bot] with no context-log block, so there is nothing to check`)
+    return
   }
   log(await context(['check'], pr.body))
 }
@@ -707,9 +784,9 @@ export function restGitHub(
     },
     async pull(number) {
       const raw = (await call('GET', `/repos/${owner}/${name}/pulls/${number}`)) as {
-        html_url: string; merged: boolean; base: { ref: string }; body: string | null; merge_commit_sha: string | null
+        html_url: string; user: { login: string } | null; merged: boolean; base: { ref: string }; body: string | null; merge_commit_sha: string | null
       }
-      return { number, url: raw.html_url, merged: raw.merged, base: raw.base.ref, body: raw.body ?? '', mergeCommit: raw.merge_commit_sha }
+      return { number, url: raw.html_url, author: raw.user?.login ?? '', merged: raw.merged, base: raw.base.ref, body: raw.body ?? '', mergeCommit: raw.merge_commit_sha }
     },
     async comment(number, body) {
       await call('POST', `${issues}/${number}/comments`, { body })
@@ -822,6 +899,24 @@ export function restGitHub(
     async dispatchWorkflow(file, ref, inputs) {
       await call('POST', `/repos/${owner}/${name}/actions/workflows/${encodeURIComponent(file)}/dispatches`, { ref, ...(inputs && { inputs }) })
     },
+    async issueBody(number) {
+      const raw = (await call('GET', `${issues}/${number}`)) as { body: string | null }
+      return raw.body ?? ''
+    },
+    async mergedPulls(base) {
+      const raw = (await call('GET', `/repos/${owner}/${name}/pulls?state=closed&base=${encodeURIComponent(base)}&per_page=100&sort=created&direction=asc`)) as {
+        number: number; html_url: string; body: string | null; merged_at: string | null
+      }[]
+      return raw.filter((p) => p.merged_at).map((p) => ({ number: p.number, url: p.html_url, body: p.body ?? '' }))
+    },
+    async pullDetail(number) {
+      const raw = (await call('GET', `/repos/${owner}/${name}/pulls/${number}`)) as { body: string | null; head: { sha: string } }
+      const comments = (await call('GET', `${issues}/${number}/comments?per_page=100`)) as { body: string | null; user: { login: string } | null }[]
+      return { body: raw.body ?? '', headSha: raw.head.sha, comments: comments.map((c) => ({ author: c.user?.login ?? null, body: c.body ?? '' })) }
+    },
+    async editPullBody(number, body) {
+      await call('PATCH', `/repos/${owner}/${name}/pulls/${number}`, { body })
+    },
     async createSubIssue({ title, body, epic, blockedBy }) {
       // The sub-issue and dependency endpoints take issue ids, not numbers.
       const created = (await call('POST', issues, { title, body })) as { id: number; number: number }
@@ -868,7 +963,9 @@ if (import.meta.main) {
     else if (command === 'notify') await notify(Number(arg), deps)
     else if (command === 'resume') await resume(Number(arg), deps)
     else if (command === 'sync-check') await syncCheck(deps)
-    else if (command === 'followup') await followup(Number(arg), extra.join(' '), await text(process.stdin), deps)
+    else if (command === 'rollup') {
+      if ((await refreshRollup(Number(arg), deps)) === 'failed') process.exitCode = 1
+    } else if (command === 'followup') await followup(Number(arg), extra.join(' '), await text(process.stdin), deps)
     else throw new Error(USAGE)
   } catch (err) {
     console.error(err instanceof Error ? err.message : err)

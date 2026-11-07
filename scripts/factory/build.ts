@@ -5,7 +5,8 @@
 //   node scripts/factory/build.ts <issue> [--shadow]
 // --shadow works a ticket without `factory-ready` (a trial run on a ticket Warp isn't working); every other
 // addressing rule still applies.
-// Stages: triage -> spec -> implement -> review (up to MAX_REVIEW_ROUNDS, fixes go back to implement) ->
+// Stages: triage -> spec -> implement -> review (up to MAX_REVIEW_ROUNDS, fixes go back to implement; low-severity
+// fixes left after the last round are fixed and checked, not re-reviewed) ->
 // required checks -> squash merge -> dispatch.ts `landed` in-process. The prompts are
 // scripts/factory/prompts/<stage>.md; each gets the ticket and earlier stages' output appended as data.
 //
@@ -18,7 +19,7 @@
 import { spawn } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { landed, notify, restGitHub, runContext, ticketId, type Deps as DispatchDeps, type GitHub, type Issue } from './dispatch.ts'
+import { landed, notify, refreshRollup, restGitHub, runContext, ticketId, type Deps as DispatchDeps, type GitHub, type Issue } from './dispatch.ts'
 import { check as checkReport, render as renderReport } from './report.ts'
 
 export const STAGES = ['triage', 'spec', 'implement', 'review'] as const
@@ -72,6 +73,21 @@ export function reviewVerdict(text: string, report: { ok: boolean; verdict: stri
   if (/^\s*\**VERDICT:\**\s*needs-human/im.test(text)) return NEEDS_HUMAN
   if (!report.ok) return verdict(text)
   return report.verdict === 'fixes needed' ? 'fixes' : 'clean'
+}
+
+// The open unambiguous fixes in a checked review report, or null when the report failed its check (then its
+// severities can't be trusted, so they are never fixed unreviewed).
+export function openFixes(checked: { errors: string[]; findings: { group: string; severity: string; status: string; text: string }[] }): { severity: string; text: string }[] | null {
+  if (checked.errors.length) return null
+  return checked.findings.filter((f) => f.group === 'Unambiguous fixes' && f.status === 'open').map((f) => ({ severity: f.severity, text: f.text }))
+}
+
+// What a review round with open fixes leads to. Before the cap: fix and review again. At the cap (review is
+// capped at MAX_REVIEW_ROUNDS): when every open fix is low severity, implement fixes them and the required
+// checks must pass, but no review runs again; anything medium or high stops for a person.
+export function afterFixes(round: number, fixes: { severity: string }[] | null): 'again' | 'fix-unreviewed' | 'stop' {
+  if (round < MAX_REVIEW_ROUNDS) return 'again'
+  return fixes !== null && fixes.length > 0 && fixes.every((f) => f.severity === 'low') ? 'fix-unreviewed' : 'stop'
 }
 
 // Saves the evidence the review prompt reads, since read-only Claude Code can't run commands. Arguments:
@@ -143,6 +159,8 @@ export type BodyParts = {
   rounds: Round[]
   decisions: { text: string }[]
   runUrl: string
+  // Low-severity fixes made after the last review round: checked by CI, not re-reviewed.
+  unreviewed?: string[]
 }
 
 // The pull request body: Ticket line, summary, results, review log, and the context-log block last.
@@ -159,6 +177,9 @@ export function prBody(p: BodyParts): string {
   const reviewLog = p.rounds.length
     ? p.rounds.map((r) => `- Round ${r.round}: ${r.verdict} ([findings](${r.commentUrl})) ${r.modelsLine}`).join('\n')
     : '- Not reviewed yet.'
+  const left = p.unreviewed?.length
+    ? ['', `Fixed after round ${MAX_REVIEW_ROUNDS}, not re-reviewed (low severity; the required checks passed):`, ...p.unreviewed.map((t) => `- ${t.replace(/\s+/g, ' ').trim()}`)]
+    : []
   return [
     `Ticket: #${p.ticket}`,
     '',
@@ -173,6 +194,7 @@ export function prBody(p: BodyParts): string {
     '## Review log',
     '',
     reviewLog,
+    ...left,
     '',
     '## Claude models',
     '',
@@ -200,10 +222,11 @@ export type BuildDeps = {
   github: GitHub
   exec: Exec
   prompt: (stage: Stage) => Promise<string>
-  // dispatch.ts `notify` and `landed`, run in-process (see the header).
+  // dispatch.ts `notify`, `landed` and `rollup`, run in-process (see the header).
   writeFile: (path: string, text: string) => Promise<void>
   notify: (issue: number) => Promise<unknown>
   landed: (pr: number) => Promise<void>
+  rollup: (epic: number) => Promise<unknown>
   runUrl: string
   runId: number
   sleep: (ms: number) => Promise<void>
@@ -307,8 +330,11 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
     }
     const ahead = Number(await ok('git', ['rev-list', '--count', `origin/main..origin/${epicBranch}`]))
     if (ahead > 0 && !(await github.epicPull(epic.number))) {
-      const body = `Closes #${epic.number}\n\nThe roll-up is written before this is marked ready.\n\n\`\`\`context-log\n{"version": 1, "decisions": [], "corrections": []}\n\`\`\``
+      // A placeholder for a moment: `rollup` replaces it with the full description right away, and again at
+      // every ticket landing.
+      const body = `Closes #${epic.number}\n\nThe description is being written by \`dispatch.ts rollup\`.\n\n\`\`\`context-log\n{"version": 1, "decisions": [], "corrections": []}\n\`\`\``
       await ok('gh', ['pr', 'create', '--draft', '--base', 'main', '--head', epicBranch, '--title', epic.title, '--label', 'epic', '--body-file', '-'], { input: body })
+      await deps.rollup(epic.number)
     }
 
     // The ticket's own working copy, so this checkout of main (and this script) never changes underneath.
@@ -337,7 +363,8 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
     await comment(number, `## Plan\n\n${spec.text}\n\n${spec.modelsLine}`)
     if (verdict(spec.text) === NEEDS_HUMAN) await stopForHuman([number], 'the plan has items only a person can decide (see "Needs human" in the plan).')
 
-    // 6-7. Implement, then review; unambiguous fixes go back to implement, up to MAX_REVIEW_ROUNDS reviews.
+    // 6-7. Implement, then review; unambiguous fixes go back to implement, up to MAX_REVIEW_ROUNDS reviews. Low-
+    // severity fixes left after the last round are implemented and checked but not reviewed (see afterFixes).
     const rounds: Round[] = []
     const implementData = [
       { heading: 'Ticket', text: ticketText },
@@ -347,6 +374,7 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
     let findings = ''
     let summary = ''
     let checks = ''
+    let unreviewed: string[] = [] // set once low-severity fixes go to implement after the last review round
     for (let round = 1; ; round++) {
       // Implement (or fix), with one retry when lint, type check or tests fail.
       for (let attempt = 1; ; attempt++) {
@@ -376,6 +404,8 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
       // (A push made with GITHUB_TOKEN starts no workflow, so the checks are dispatched here.)
       await github.dispatchWorkflow('ci.yml', branch)
       await github.dispatchWorkflow('factory.yml', branch, { pr: String(pr) })
+      // Low-severity fixes after the last round: the checks just dispatched gate the merge; no review runs.
+      if (unreviewed.length) break
       await comment(pr, `Review round ${round} started (Claude Code, Opus).`)
       await ok('sh', ['-c', EVIDENCE_SCRIPT, 'evidence', String(pr), `origin/${epicBranch}`], { cwd: WORKTREE })
       const review = await claude('review', [
@@ -410,12 +440,15 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
       rounds.push({ round, verdict: v, modelsLine: review.modelsLine, commentUrl })
       if (v === NEEDS_HUMAN) await stopForHuman([number, pr], `review round ${round} found a change to a locked interface or another ticket's area.`)
       if (v === 'clean') break
-      if (round === MAX_REVIEW_ROUNDS) await stopForHuman([number, pr], `review still has findings after ${MAX_REVIEW_ROUNDS} rounds.`)
+      const fixes = openFixes(checked)
+      const next = afterFixes(round, fixes)
+      if (next === 'stop') await stopForHuman([number, pr], `review still has medium or high fixes open after ${MAX_REVIEW_ROUNDS} rounds.`)
+      if (next === 'fix-unreviewed') unreviewed = fixes!.map((f) => f.text)
       findings = report
     }
 
     // 8. Record, then 9. checks and merge.
-    const finalBody = prBody({ ticket: number, summary, checks, modelsLines, rounds, decisions: decisions(spec.text), runUrl })
+    const finalBody = prBody({ ticket: number, summary, checks, modelsLines, rounds, decisions: decisions(spec.text), runUrl, unreviewed })
     await ok('node', ['scripts/context.ts', 'check'], { input: finalBody, cwd: REPO_ROOT })
     await ok('gh', ['pr', 'edit', String(pr), '--body-file', '-'], { input: finalBody })
     await ok('gh', ['pr', 'ready', String(pr)])
@@ -488,6 +521,7 @@ if (import.meta.main) {
       writeFile: (path, text) => writeFile(path, text),
       notify: (issue) => notify(issue, dispatchDeps),
       landed: (pr) => landed(pr, dispatchDeps),
+      rollup: (epic) => refreshRollup(epic, dispatchDeps),
       runUrl: process.env.RUN_URL ?? '',
       runId: Number(process.env.GITHUB_RUN_ID ?? 0),
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),

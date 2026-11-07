@@ -1,0 +1,89 @@
+{
+  "@type": "CVR.CastVoteRecordReport",
+  "Version": "1.0.0",
+  "GeneratedDate": "2024-11-05T20:15:00Z",
+  "ReportType": ["originating-device-export"],
+  "ReportGeneratingDeviceIds": ["scanner-7"],
+  "ReportingDevice": [
+    { "@id": "scanner-7", "@type": "CVR.ReportingDevice", "Manufacturer": "Example Co", "Model": "PS-1", "SerialNumber": "SN-0007" }
+  ],
+  "GpUnit": [
+    { "@id": "ward-3", "@type": "CVR.GpUnit", "Type": "precinct", "Name": "Ward 3", "ReportingDeviceIds": ["scanner-7"] },
+    { "@id": "lake-county", "@type": "CVR.GpUnit", "Type": "other", "OtherType": "county", "Name": "Lake County" }
+  ],
+  "Election": [
+    {
+      "@id": "lake-2024",
+      "@type": "CVR.Election",
+      "Name": "Lake County General 2024",
+      "ElectionScopeId": "lake-county",
+      "Candidate": [
+        { "@id": "c-river", "@type": "CVR.Candidate", "Name": "Pat River" },
+        { "@id": "c-stone", "@type": "CVR.Candidate", "Name": "Lee Stone" }
+      ],
+      "Contest": [
+        {
+          "@id": "mayor",
+          "@type": "CVR.CandidateContest",
+          "Name": "Mayor",
+          "VotesAllowed": 1,
+          "ContestSelection": [
+            { "@id": "sel-river", "@type": "CVR.CandidateSelection", "CandidateIds": ["c-river"] },
+            { "@id": "sel-stone", "@type": "CVR.CandidateSelection", "CandidateIds": ["c-stone"] }
+          ]
+        },
+        {
+          "@id": "bond-a",
+          "@type": "CVR.BallotMeasureContest",
+          "Name": "Library Bond A",
+          "ContestSelection": [
+            { "@id": "bond-a-yes", "@type": "CVR.BallotMeasureSelection", "Selection": "Yes" },
+            { "@id": "bond-a-no", "@type": "CVR.BallotMeasureSelection", "Selection": "No" }
+          ]
+        }
+      ]
+    }
+  ],
+  "CVR": [
+    {
+      "@type": "CVR.CVR",
+      "UniqueId": "lake-ballot-0001",
+      "BallotStyleId": "bs-ward-3",
+      "BallotStyleUnitId": "ward-3",
+      "CreatingDeviceId": "scanner-7",
+      "ElectionId": "lake-2024",
+      "CurrentSnapshotId": "snap-0001",
+      "CVRSnapshot": [
+        {
+          "@id": "snap-0001",
+          "@type": "CVR.CVRSnapshot",
+          "Type": "original",
+          "CVRContest": [
+            {
+              "@type": "CVR.CVRContest",
+              "ContestId": "mayor",
+              "CVRContestSelection": [
+                {
+                  "@type": "CVR.CVRContestSelection",
+                  "ContestSelectionId": "sel-stone",
+                  "SelectionPosition": [{ "@type": "CVR.SelectionPosition", "HasIndication": "yes", "IsAllocable": "yes", "NumberVotes": 1 }]
+                }
+              ]
+            },
+            {
+              "@type": "CVR.CVRContest",
+              "ContestId": "bond-a",
+              "CVRContestSelection": [
+                {
+                  "@type": "CVR.CVRContestSelection",
+                  "ContestSelectionId": "bond-a-no",
+                  "SelectionPosition": [{ "@type": "CVR.SelectionPosition", "HasIndication": "yes", "IsAllocable": "yes", "NumberVotes": 1 }]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

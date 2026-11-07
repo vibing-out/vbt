@@ -4,7 +4,7 @@ How the files officials upload map to the records the four cross-checks compare 
 
 - Importers: `packages/events`. `importCdfLogJson` and `importCdfLogXml` read machine event logs (NIST SP 1500-101). `importElectionReportText` and `toCheckRecords` read official results (NIST SP 1500-100 V2, JSON). The code table is `NIST_CODES` in `packages/events/src/nist-codes.ts`.
 - Checks: `packages/domain/src/cross-checks.ts`. It holds `checkMachineCounts`, `checkPrecinctTotals`, `checkElectionNightTotals`, `checkCertification`, `runCrossChecks`, `affectedBallotIds` and `planMismatchChallenges`. These are pure functions: no I/O, no crypto, and no time.
-- Storage: `private.machine_log_imports`, `private.official_results` and `private.check_results` (migration `20261107220000_cross_check_records.sql`). They are insert-only, and only `service_role` can reach them, through a server route that checks role and MFA first.
+- Storage: `private.machine_log_imports`, `private.official_results` and `private.check_results` (migration `20261107230000_cross_check_records.sql`). They are insert-only, and only `service_role` can reach them, through a server route that checks role and MFA first.
 
 Ingest is file-based and one-way: an authenticated official uploads an exported file, and nothing ever calls a voting system.
 

@@ -17,6 +17,7 @@ const OUTBOUND_ALLOWLIST: Record<string, string> = {
   "apps/web/lib/product-db.ts": "our own Supabase: reads app_info through the Data API",
   "apps/web/lib/context-log.ts": "our own Supabase: the team's context-log project",
   "apps/web/lib/require-role.ts": "our own Supabase: Auth session, role and MFA check",
+  "apps/web/lib/service-db.ts": "our own Supabase: service_role RPCs behind the official upload and batch routes (T-05)",
   "supabase/scripts/seed-demo-officials.ts": "our own Supabase: creates the demo officials (run by a human)",
   "tools/verifier/src/cli.ts": "public verifier: read-only download of the published record from the --base-url a citizen gives",
 };

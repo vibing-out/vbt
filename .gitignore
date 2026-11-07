@@ -1,0 +1,16 @@
+.DS_Store
+*.log
+node_modules/
+.vercel/
+.env
+.env*.local
+# Per-agent sign-in files for scripts/context.ts hold passwords.
+agents/
+.next/
+next-env.d.ts
+*.tsbuildinfo
+.claude/settings.local.json
+supabase/.temp/
+coverage/
+test-results/
+playwright-report/

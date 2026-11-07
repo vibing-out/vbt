@@ -1,0 +1,53 @@
+# Checks every pull request and every push to main, and applies database migrations on push to main.
+# Deploys come from Vercel's Git integration: pull requests get a preview deployment, main gets production.
+#
+# Repository secrets required (migrations only):
+#   SUPABASE_ACCESS_TOKEN - supabase.com/dashboard/account/tokens; applies migrations on merge to main
+#   SUPABASE_DB_PASSWORD  - the production database password
+#   SUPABASE_PROJECT_ID   - the project reference string
+# Migrations deploy from CI only, per Supabase's guide: https://supabase.com/docs/guides/deployment/managing-environments
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+
+  migrate:
+    needs: check
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.122.1
+      - env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+        run: |
+          supabase link --project-ref "$SUPABASE_PROJECT_ID"
+          supabase db push --yes --linked

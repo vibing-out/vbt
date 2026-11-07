@@ -1,0 +1,40 @@
+name: Factory ticket
+description: A unit of work the factory can pick up and finish without asking.
+title: "[ticket] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Epic:** after creating this ticket, set its **Parent issue** (sidebar) to the epic. The ticket merges into the epic's branch, `epic/<epic issue number>`, and reaches main only when a human approves the epic.
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What a user can do when this is done, in one or two sentences.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Checkable statements. The reviewer and verifier judge the pull request against these, not against the pull request's own description.
+      placeholder: |
+        - [ ] Visiting /results shows one marker per county
+        - [ ] Clicking a marker opens the county's audit status
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: In scope / out of scope
+      description: Files or areas to touch, and anything the agent must leave alone.
+  - type: textarea
+    id: verify
+    attributes:
+      label: How to verify in the browser
+      description: Steps the verifier agent follows on the preview deploy. Leave blank for backend-only work.
+  - type: markdown
+    attributes:
+      value: |
+        **Dependencies:** set them with GitHub's "Blocked by" relationship in the issue sidebar, not in this text.
+        The factory starts this ticket only when every blocker is closed. When the ticket is fully written, add the `queued` label; the dispatch script adds `factory-ready`.

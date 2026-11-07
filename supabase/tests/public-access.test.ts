@@ -8,9 +8,9 @@ describeDb("the public cannot read ciphertext", () => {
 
   for (const role of PUBLIC_ROLES) {
     test.each([
-      "select ciphertext from ballots",
-      "select * from ballots",
-      "select b.tracking_code from ballots b where b.ciphertext like 'seed%'",
+      "select ciphertext from private.ballots",
+      "select * from private.ballots",
+      "select b.tracking_code from private.ballots b where b.ciphertext like 'seed%'",
       "select ciphertext from ballot_public",
     ])(`${role}: %s is refused`, async (sql) => {
       await expect(asRole(db(), role, sql)).rejects.toThrow(/permission denied|does not exist/);
@@ -36,7 +36,7 @@ describeDb("the public cannot read ciphertext", () => {
   test.each(["prev_tracking_code", "machine_id", "ballot_style", "mismatch"])(
     "anon cannot read ballots.%s",
     async (column) => {
-      await expect(asRole(db(), "anon", `select ${column} from ballots`)).rejects.toThrow(PERMISSION_DENIED);
+      await expect(asRole(db(), "anon", `select ${column} from private.ballots`)).rejects.toThrow(PERMISSION_DENIED);
     },
   );
 });
@@ -46,14 +46,14 @@ describeDb("the public cannot read event times", () => {
 
   for (const role of PUBLIC_ROLES) {
     test.each([
-      "select occurred_at from ballot_events",
-      "select recorded_at from ballot_events",
-      "select * from ballot_events",
-      "select id from ballot_events order by occurred_at",
-      "select id from ballot_events where recorded_at > now() - interval '1 day'",
-      "select actor_id from ballot_events",
-      "select batch_id from ballot_events",
-      "select nist_event_code from ballot_events",
+      "select occurred_at from private.ballot_events",
+      "select recorded_at from private.ballot_events",
+      "select * from private.ballot_events",
+      "select id from private.ballot_events order by occurred_at",
+      "select id from private.ballot_events where recorded_at > now() - interval '1 day'",
+      "select actor_id from private.ballot_events",
+      "select batch_id from private.ballot_events",
+      "select nist_event_code from private.ballot_events",
       "select created_at from batches",
     ])(`${role}: %s is refused`, async (sql) => {
       await expect(asRole(db(), role, sql)).rejects.toThrow(PERMISSION_DENIED);
@@ -94,11 +94,11 @@ describeDb("the public cannot read event times", () => {
   test("the date is Indiana local, so a late-evening event keeps its election-day date", async () => {
     const { rows } = await asRoleSteps(db(), "postgres", [
       {
-        sql: `insert into ballot_events (ballot_id, precinct_id, county_id, event_type, actor_role, actor_id,
+        sql: `insert into private.ballot_events (ballot_id, precinct_id, county_id, event_type, actor_role, actor_id,
                                          occurred_at, hash)
               select id, precinct_id, '18097', 'MISMATCH_DETECTED', 'county', 'c-1',
                      timestamptz '2026-11-04 03:30:00+00', 'h'
-              from ballots where tracking_code = 'SEED-0002'`,
+              from private.ballots where tracking_code = 'SEED-0002'`,
       },
       { sql: "set local role anon" },
       {
@@ -128,15 +128,6 @@ describeDb("what the public can read", () => {
         current_status: "CAST",
         cast_date: "2026-11-03",
       });
-    });
-
-    test(`${role} reads the same safe columns straight from ballots`, async () => {
-      const { rows } = await asRole(
-        db(),
-        role,
-        "select count(*)::int as n from ballots where ciphertext_hash is not null and current_status = 'CAST'",
-      );
-      expect(rows[0]).toEqual({ n: 50 });
     });
 
     test(`${role} reads precincts and the safe event view`, async () => {
@@ -169,7 +160,7 @@ describeDb("what the public can read", () => {
     const { rows } = await asRole(
       db(),
       "service_role",
-      "select count(*)::int as n from ballots b join ballot_events e on e.ballot_id = b.id where b.ciphertext is not null and e.occurred_at is not null",
+      "select count(*)::int as n from private.ballots b join private.ballot_events e on e.ballot_id = b.id where b.ciphertext is not null and e.occurred_at is not null",
     );
     expect(rows[0]).toEqual({ n: 50 });
   });

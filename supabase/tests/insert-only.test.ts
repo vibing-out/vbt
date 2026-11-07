@@ -2,11 +2,11 @@ import { expect, test } from "vitest";
 import { asRole, asRoleSteps, describeDb, INSERT_ONLY, PERMISSION_DENIED, type Role, useScratchDatabase } from "./support.ts";
 
 const INSERT_EVENT = `
-  insert into ballot_events (ballot_id, precinct_id, county_id, event_type, from_status, to_status,
+  insert into private.ballot_events (ballot_id, precinct_id, county_id, event_type, from_status, to_status,
                              actor_role, actor_id, occurred_at, prev_hash, hash)
   select id, precinct_id, '18097', 'STATUS_CHANGE', 'CAST', 'TALLIED_PRECINCT',
          'poll_worker', 'pw-1', now(), 'prev', 'next'
-  from ballots where tracking_code = 'SEED-0001'
+  from private.ballots where tracking_code = 'SEED-0001'
   returning id`;
 
 const INSERT_STAGE_RECORD = `
@@ -15,7 +15,7 @@ const INSERT_STAGE_RECORD = `
   returning id`;
 
 const INSERT_ONLY_TABLES = [
-  { table: "ballot_events", insert: INSERT_EVENT },
+  { table: "private.ballot_events", insert: INSERT_EVENT },
   { table: "stage_records", insert: INSERT_STAGE_RECORD },
 ];
 
@@ -66,8 +66,8 @@ describeDb("insert-only tables", () => {
   }
 
   test("the seeded CAST events survive an attempted delete", async () => {
-    await expect(asRole(db(), "postgres", "delete from ballot_events")).rejects.toThrow(INSERT_ONLY);
-    const { rows } = await db().query("select count(*)::int as n from ballot_events");
+    await expect(asRole(db(), "postgres", "delete from private.ballot_events")).rejects.toThrow(INSERT_ONLY);
+    const { rows } = await db().query("select count(*)::int as n from private.ballot_events");
     expect(rows[0]).toEqual({ n: 50 });
   });
 });
@@ -78,18 +78,18 @@ describeDb("writes are server-only", () => {
   const PUBLIC_WRITES = [
     "insert into precincts (id, county_id, name) values ('x', 'y', 'z')",
     "insert into machines (id, precinct_id, vendor, model, public_key) values ('m', '18097-001', 'v', 'm', 'k')",
-    `insert into ballots (tracking_code, ciphertext, ciphertext_hash, ballot_style, precinct_id, machine_id, cast_date)
+    `insert into private.ballots (tracking_code, ciphertext, ciphertext_hash, ballot_style, precinct_id, machine_id, cast_date)
      values ('NEW', 'c', 'h', 's', '18097-001', 'M-18097-001-A', current_date)`,
     `insert into batches (scope, scope_id, from_status, to_status, actor_id, ballot_count)
      values ('precinct', '18097-001', 'CAST', 'TALLIED_PRECINCT', 'pw-1', 0)`,
     INSERT_EVENT,
     INSERT_STAGE_RECORD,
     "insert into app_info (key, value) values ('k', 'v')",
-    "update ballots set current_status = 'CERTIFIED'",
-    "update ballots set mismatch = true",
+    "update private.ballots set current_status = 'CERTIFIED'",
+    "update private.ballots set mismatch = true",
     "update precincts set name = 'renamed'",
     "update app_info set value = 'changed'",
-    "delete from ballots",
+    "delete from private.ballots",
     "delete from machines",
     "delete from precincts",
     "delete from app_info",
@@ -102,22 +102,22 @@ describeDb("writes are server-only", () => {
   }
 
   test.each([
-    "update ballots set ciphertext = 'tampered'",
-    "update ballots set ciphertext_hash = 'tampered'",
-    "update ballots set tracking_code = 'TAMPERED'",
-    "update ballots set prev_tracking_code = 'TAMPERED'",
-    "update ballots set cast_date = current_date - 1",
-    "update ballots set current_status = 'CERTIFIED', ciphertext = 'tampered'",
+    "update private.ballots set ciphertext = 'tampered'",
+    "update private.ballots set ciphertext_hash = 'tampered'",
+    "update private.ballots set tracking_code = 'TAMPERED'",
+    "update private.ballots set prev_tracking_code = 'TAMPERED'",
+    "update private.ballots set cast_date = current_date - 1",
+    "update private.ballots set current_status = 'CERTIFIED', ciphertext = 'tampered'",
   ])("service_role cannot change a ballot's fixed columns: %s", async (sql) => {
     await expect(asRole(db(), "service_role", sql)).rejects.toThrow(PERMISSION_DENIED);
   });
 
   test("service_role can update a ballot's current_status and mismatch", async () => {
     const { rows } = await asRoleSteps(db(), "service_role", [
-      { sql: "update ballots set current_status = 'TALLIED_PRECINCT' where tracking_code = 'SEED-0001'" },
-      { sql: "update ballots set mismatch = true where tracking_code = 'SEED-0001'" },
+      { sql: "update private.ballots set current_status = 'TALLIED_PRECINCT' where tracking_code = 'SEED-0001'" },
+      { sql: "update private.ballots set mismatch = true where tracking_code = 'SEED-0001'" },
       {
-        sql: "select current_status, mismatch, ciphertext_hash is not null as hashed from ballots where tracking_code = 'SEED-0001'",
+        sql: "select current_status, mismatch, ciphertext_hash is not null as hashed from private.ballots where tracking_code = 'SEED-0001'",
       },
     ]);
     expect(rows).toEqual([{ current_status: "TALLIED_PRECINCT", mismatch: true, hashed: true }]);
@@ -130,15 +130,15 @@ describeDb("writes are server-only", () => {
         sql: "insert into machines (id, precinct_id, vendor, model, public_key) values ('M-3', '18097-003', 'v', 'm', 'k')",
       },
       {
-        sql: `insert into ballots (tracking_code, ciphertext, ciphertext_hash, ballot_style, precinct_id, machine_id, cast_date)
+        sql: `insert into private.ballots (tracking_code, ciphertext, ciphertext_hash, ballot_style, precinct_id, machine_id, cast_date)
               values ('NEW-1', 'c', 'h', 's', '18097-003', 'M-3', current_date)`,
       },
       {
         sql: `insert into batches (scope, scope_id, from_status, to_status, actor_id, ballot_count)
               values ('precinct', '18097-003', 'CAST', 'TALLIED_PRECINCT', 'pw-1', 1)`,
       },
-      { sql: "update ballots set current_status = 'TALLIED_PRECINCT', mismatch = true where tracking_code = 'NEW-1'" },
-      { sql: "delete from ballots where tracking_code = 'NEW-1'" },
+      { sql: "update private.ballots set current_status = 'TALLIED_PRECINCT', mismatch = true where tracking_code = 'NEW-1'" },
+      { sql: "delete from private.ballots where tracking_code = 'NEW-1'" },
       { sql: "select count(*)::int as n from batches" },
     ]);
     expect(result.rows[0]).toEqual({ n: 1 });

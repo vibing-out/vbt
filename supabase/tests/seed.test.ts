@@ -17,14 +17,14 @@ describeDb("dev seed", () => {
 
   test("has exactly 3 precincts and 50 ballots", async () => {
     const { rows } = await db().query(
-      "select (select count(*)::int from precincts) as precincts, (select count(*)::int from ballots) as ballots",
+      "select (select count(*)::int from precincts) as precincts, (select count(*)::int from private.ballots) as ballots",
     );
     expect(rows[0]).toEqual({ precincts: 3, ballots: 50 });
   });
 
   test("spreads the ballots over every precinct, each on its precinct's machine", async () => {
     const { rows } = await db().query(
-      `select b.precinct_id, count(*)::int as n from ballots b
+      `select b.precinct_id, count(*)::int as n from private.ballots b
        join machines m on m.id = b.machine_id and m.precinct_id = b.precinct_id
        group by 1 order by 1`,
     );
@@ -38,9 +38,9 @@ describeDb("dev seed", () => {
   test("gives every ballot a CAST event and a matching ciphertext hash", async () => {
     const { rows } = await db().query(
       `select
-         (select count(*)::int from ballots b where exists
-            (select 1 from ballot_events e where e.ballot_id = b.id and e.event_type = 'CAST')) as with_cast,
-         (select count(*)::int from ballots
+         (select count(*)::int from private.ballots b where exists
+            (select 1 from private.ballot_events e where e.ballot_id = b.id and e.event_type = 'CAST')) as with_cast,
+         (select count(*)::int from private.ballots
             where ciphertext_hash = encode(sha256(convert_to(ciphertext, 'UTF8')), 'hex')) as hash_ok`,
     );
     expect(rows[0]).toEqual({ with_cast: 50, hash_ok: 50 });
@@ -48,9 +48,9 @@ describeDb("dev seed", () => {
 
   test("chains tracking codes per machine", async () => {
     const { rows } = await db().query(
-      `select count(*)::int as broken from ballots b
+      `select count(*)::int as broken from private.ballots b
        where b.prev_tracking_code is not null and not exists
-         (select 1 from ballots p where p.tracking_code = b.prev_tracking_code and p.machine_id = b.machine_id)`,
+         (select 1 from private.ballots p where p.tracking_code = b.prev_tracking_code and p.machine_id = b.machine_id)`,
     );
     expect(rows[0]).toEqual({ broken: 0 });
   });

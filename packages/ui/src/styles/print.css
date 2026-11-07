@@ -1,0 +1,76 @@
+/* The one print block for VBT (design system README, Print): the tracker page, the receipt slip and
+   the cross-check report. One ink on white, light theme always. Components carry vbt-<name> classes
+   as hooks for these rules. */
+
+.vbt-print-only {
+  display: none;
+}
+
+@media print {
+  :root,
+  [data-theme="dark"] {
+    color-scheme: light;
+  }
+
+  body {
+    background: white;
+    color: black;
+  }
+
+  /* Never printed: buttons, the scanner and anything marked for hiding. */
+  [data-print="hide"],
+  button,
+  .vbt-scanner {
+    display: none !important;
+  }
+
+  /* Printed only, hidden on screen (the tracker address, the date printed). */
+  .vbt-print-only {
+    display: revert !important;
+  }
+
+  /* Dark heroes become outlined boxes. */
+  .vbt-hero,
+  .vbt-pass,
+  .vbt-card-hero {
+    background: white !important;
+    color: black !important;
+    border: 1px solid black !important;
+  }
+
+  .vbt-hero *,
+  .vbt-pass * {
+    color: black !important;
+    border-color: black !important;
+  }
+
+  /* Shadows become thin rules. */
+  .vbt-card,
+  .vbt-table-wrap,
+  .vbt-hero,
+  .vbt-pass {
+    box-shadow: none !important;
+    border: 1px solid black !important;
+  }
+
+  /* Badges keep icon, word and an outline if the printer drops the fill. */
+  .vbt-badge {
+    outline: 1px solid currentColor !important;
+    outline-offset: 0 !important;
+  }
+
+  /* Cards and log rows never split across pages. */
+  .vbt-card,
+  .vbt-hero,
+  .vbt-pass,
+  .vbt-slip,
+  .vbt-receipt,
+  .vbt-table tr,
+  .vbt-history li {
+    break-inside: avoid;
+  }
+
+  .vbt-table thead {
+    position: static !important;
+  }
+}

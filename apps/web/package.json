@@ -12,14 +12,20 @@
   },
   "dependencies": {
     "@flags-sdk/vercel": "^1.6.0",
+    "@vbt/ui": "workspace:*",
     "flags": "^4.4.0",
     "next": "16.4.5",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "4.3.5",
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/react": "16.3.3",
     "@types/node": "24.10.1",
     "@types/react": "19.3.0",
+    "jsdom": "31.0.0",
+    "tailwindcss": "4.3.5",
     "typescript": "5.9.3",
     "vitest": "5.1.0"
   }

@@ -1,7 +1,9 @@
+import { Button } from "@vbt/ui/components/button";
 import { requireOfficialPage } from "../../../../lib/page-guard";
 import { serviceDb } from "../../../../lib/official-db";
 import { BatchForm } from "../../batch-form";
-import { Forbidden, OfficialNav, StatusCounts } from "../../ui";
+import { homePath, OfficialShell } from "../../shell";
+import { Forbidden, StatusCounts } from "../../ui";
 
 // County view (T-09): ballots by status, the election-night report (TALLIED_PRECINCT -> REPORTED_UNOFFICIAL,
 // gated by C3) and certification (REPORTED_UNOFFICIAL -> CERTIFIED, gated by C4). County and state officials.
@@ -15,32 +17,37 @@ export default async function CountyPage({ params }: { params: Promise<{ id: str
   const official = await requireOfficialPage(ROLES, { scope: "county", id });
   if (!official) return <Forbidden />;
 
+  const home = homePath(official);
   const counts = await serviceDb().statusCounts("county", id);
   return (
-    <main>
-      <h1>County {id}</h1>
-      <OfficialNav />
+    <OfficialShell title={`County ${id}`} home={home} description="Ballots by status, election-night results and certification.">
       <StatusCounts counts={counts} />
-      <BatchForm
-        scope="county"
-        scopeId={id}
-        from="TALLIED_PRECINCT"
-        to="REPORTED_UNOFFICIAL"
-        action="Report election-night results"
-        count={counts.TALLIED_PRECINCT ?? 0}
-      />
-      <BatchForm
-        scope="county"
-        scopeId={id}
-        from="REPORTED_UNOFFICIAL"
-        to="CERTIFIED"
-        action="Certify the county"
-        count={counts.REPORTED_UNOFFICIAL ?? 0}
-      />
-      <p>
-        <a href={`/official/challenges?county=${encodeURIComponent(id)}`}>Challenge queue</a> ·{" "}
-        <a href={`/official/mismatches?county=${encodeURIComponent(id)}`}>Mismatch report</a>
-      </p>
-    </main>
+      <div className="grid gap-4 md:grid-cols-2">
+        <BatchForm
+          scope="county"
+          scopeId={id}
+          from="TALLIED_PRECINCT"
+          to="REPORTED_UNOFFICIAL"
+          action="Report election-night results"
+          count={counts.TALLIED_PRECINCT ?? 0}
+        />
+        <BatchForm
+          scope="county"
+          scopeId={id}
+          from="REPORTED_UNOFFICIAL"
+          to="CERTIFIED"
+          action="Certify the county"
+          count={counts.REPORTED_UNOFFICIAL ?? 0}
+        />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button asChild mode="admin" variant="secondary">
+          <a href={`/official/challenges?county=${encodeURIComponent(id)}`}>Challenge queue</a>
+        </Button>
+        <Button asChild mode="admin" variant="secondary">
+          <a href={`/official/mismatches?county=${encodeURIComponent(id)}`}>Mismatch report</a>
+        </Button>
+      </div>
+    </OfficialShell>
   );
 }

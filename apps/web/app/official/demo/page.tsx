@@ -1,5 +1,6 @@
 import { isSetId } from "@vbt/demo";
 import { requireOfficialPage } from "../../../lib/page-guard";
+import { homePath, OfficialShell } from "../shell";
 import { Forbidden } from "../ui";
 import { DemoControl } from "./demo-control";
 
@@ -19,5 +20,17 @@ export default async function DemoControlPage({ searchParams }: { searchParams: 
 
   const set = (await searchParams).set;
   const initialSet = typeof set === "string" && isSetId(set) ? set : "";
-  return <DemoControl initialSet={initialSet} />;
+  return (
+    <OfficialShell
+      title="Demo control"
+      home={homePath(official)}
+      description={
+        <>
+          Official tools · judges&apos; 3-minute demo. Seed a fresh set with <code className="font-mono">demo seed</code> for each rehearsal.
+        </>
+      }
+    >
+      <DemoControl initialSet={initialSet} />
+    </OfficialShell>
+  );
 }

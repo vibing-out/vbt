@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { OfficialTarget } from "@vbt/domain";
-import type { MismatchRow, ServiceDb } from "./service-db";
+import type { MismatchRow, ServiceDb } from "./official-db";
 
 // GET /api/reports/mismatches (T-09): mismatched or challenged ballots in one precinct or county, for
 // officials only. Machine ids are official data (locked § Cross-checks privacy rule); times are not needed,

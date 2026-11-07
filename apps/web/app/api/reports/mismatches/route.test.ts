@@ -5,8 +5,8 @@ import { bearer } from "../../../../lib/testing/requests";
 
 // T-09 AC5 and AC2: GET /api/reports/mismatches.
 const state = vi.hoisted(() => ({ db: undefined as unknown }));
-vi.mock("../../../../lib/service-db", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../../../lib/service-db")>()),
+vi.mock("../../../../lib/official-db", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../../lib/official-db")>()),
   serviceDb: () => state.db,
 }));
 const { GET } = await import("./route");

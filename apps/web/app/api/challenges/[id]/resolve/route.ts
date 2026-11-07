@@ -1,7 +1,7 @@
 import { resolveChallenge } from "../../../../../lib/challenges";
 import { badRequest, respond } from "../../../../../lib/http";
 import { forbidden, requireRole } from "../../../../../lib/require-role";
-import { serviceDb } from "../../../../../lib/service-db";
+import { serviceDb } from "../../../../../lib/official-db";
 
 // POST /api/challenges/{ballot id}/resolve (T-09, locked API: returns the new status).
 // JSON { "decision": "accepted" | "rejected", "reason": "..." }; a reason is required to reject.

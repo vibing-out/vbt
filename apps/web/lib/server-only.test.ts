@@ -9,6 +9,7 @@ const serverModules = [
   "lib/require-role.ts",
   // T-09: the service-role database, the crypto adapter (election keys) and the official tools.
   "lib/service-db.ts",
+  "lib/official-db.ts",
   "lib/crypto/index.ts",
   "lib/batches.ts",
   "lib/challenges.ts",
@@ -16,6 +17,8 @@ const serverModules = [
   "lib/uploads.ts",
   "lib/page-guard.ts",
   "lib/track/lookup.ts",
+  "lib/election.ts",
+  "lib/ingest.ts",
 ];
 
 function sourceFiles(dir: string): string[] {

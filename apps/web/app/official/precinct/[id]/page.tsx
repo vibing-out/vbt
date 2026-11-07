@@ -1,6 +1,6 @@
 import { OFFICIAL_ROLES } from "@vbt/domain";
 import { requireOfficialPage } from "../../../../lib/page-guard";
-import { serviceDb } from "../../../../lib/service-db";
+import { serviceDb } from "../../../../lib/official-db";
 import { BatchForm } from "../../batch-form";
 import { Forbidden, OfficialNav, StatusCounts } from "../../ui";
 

@@ -1,7 +1,7 @@
 import { OFFICIAL_ROLES } from "@vbt/domain";
 import { mismatchReport } from "../../../lib/mismatches";
 import { requireOfficialPage } from "../../../lib/page-guard";
-import { serviceDb } from "../../../lib/service-db";
+import { serviceDb } from "../../../lib/official-db";
 import { pageTarget } from "../scope";
 import { Forbidden, OfficialNav } from "../ui";
 

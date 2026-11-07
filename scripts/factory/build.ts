@@ -290,10 +290,12 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
     // A rerun (after a person answered needs-human) continues the existing branch instead of starting over.
     const resumed = Boolean(await ok('git', ['ls-remote', '--heads', 'origin', branch]))
     await ok('git', ['worktree', 'add', '-B', branch, WORKTREE, resumed ? `origin/${branch}` : `origin/${epicBranch}`])
-    const ticketText = `#${issue.number} ${issue.title}\n\n${await ok('gh', ['issue', 'view', String(number), '--json', 'body,comments', '--jq', '.body + "\\n\\n" + ([.comments[] | select(.body | test("Context from earlier tickets")) | .body] | join("\\n\\n"))'])}`
-    // Files the prompts read: read-only Claude Code reads them but can't fetch them itself.
+    // Earlier tickets' context reaches Claude only through /tmp/ticket-context.md, below.
+    const ticketText = `#${issue.number} ${issue.title}\n\n${await ok('gh', ['issue', 'view', String(number), '--json', 'body', '--jq', '.body'])}`
+    // Files the prompts read: read-only Claude Code reads them but can't fetch them itself. Only dispatch's
+    // own context comment counts: on a public repository anyone can post one that merely looks like it.
     await deps.writeFile('/tmp/ticket.json', await ok('gh', ['issue', 'view', String(number), '--json', 'number,title,body,labels']))
-    await deps.writeFile('/tmp/ticket-context.md', await ok('gh', ['issue', 'view', String(number), '--json', 'comments', '--jq', '[.comments[] | select(.body | startswith("## Context from earlier tickets")) | .body] | last // ""']))
+    await deps.writeFile('/tmp/ticket-context.md', await ok('gh', ['issue', 'view', String(number), '--json', 'comments', '--jq', '[.comments[] | select(.author.login == "github-actions" and (.body | startswith("## Context from earlier tickets"))) | .body] | last // ""']))
     await deps.writeFile('/tmp/report.example.md', await ok('cat', ['scripts/factory/report.example.md'], { cwd: REPO_ROOT }))
     const modelsLines: string[] = []
 

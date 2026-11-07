@@ -1,8 +1,9 @@
+import Link from "next/link";
 import { tokens } from "@vbt/ui";
-import { countContextEntries } from "../lib/context-log";
-import { getDemoFlags, type DemoFlags } from "../lib/demo-flags";
-import { readGreeting } from "../lib/product-db";
-import { placeholderStatus } from "../lib/status";
+import { countContextEntries } from "../../lib/context-log";
+import { getDemoFlags, type DemoFlags } from "../../lib/demo-flags";
+import { readGreeting } from "../../lib/product-db";
+import { placeholderStatus } from "../../lib/status";
 
 // The demo-feature flags (flags.ts), each shown by its live value so a Flags Explorer toggle is visible.
 const demoFeatures: { key: string; label: string; flag: keyof DemoFlags }[] = [
@@ -19,6 +20,11 @@ export default async function Home() {
       style={{ fontFamily: tokens.font.body, color: tokens.color.text, padding: tokens.space.lg }}
     >
       <h1 style={{ color: tokens.color.accent }}>VBT</h1>
+      <p>
+        <Link href="/track" data-testid="track-link" style={{ color: tokens.color.accent, fontWeight: 700 }}>
+          Track your ballot →
+        </Link>
+      </p>
       <p data-testid="greeting">{greeting ?? "Greeting unavailable"}</p>
       <p>{placeholderStatus()}</p>
       <section data-testid="demo-features" aria-label="Demo features" style={{ marginBlock: tokens.space.md }}>

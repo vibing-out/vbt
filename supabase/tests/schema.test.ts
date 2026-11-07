@@ -5,7 +5,7 @@ import { asRole, asRoleSteps, describeDb, useScratchDatabase } from "./support.t
 
 // ballots and ballot_events live in private, out of the Data API's reach (resolution 1).
 const PUBLIC_TABLES = ["app_info", "batches", "machines", "official_roles", "precincts", "stage_records"];
-const PRIVATE_TABLES = ["ballot_events", "ballots"];
+const PRIVATE_TABLES = ["ballot_events", "ballots", "uploads"];
 const TABLES = [...PUBLIC_TABLES.map((t) => `public.${t}`), ...PRIVATE_TABLES.map((t) => `private.${t}`)].sort();
 
 describeDb("migrations on an empty database", () => {

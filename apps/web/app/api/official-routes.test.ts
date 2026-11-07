@@ -24,6 +24,12 @@ test("there is at least one official route (the T-20 probe)", () => {
   expect(officialRoutes).toContain(join("official", "whoami", "route.ts"));
 });
 
+test("the T-09 official endpoints exist and are covered by the guard check below", () => {
+  for (const route of ["events", "batches", join("challenges", "[id]", "resolve"), join("reports", "mismatches")]) {
+    expect(officialRoutes).toContain(join(route, "route.ts"));
+  }
+});
+
 const CALL = /\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*await\s+requireRole\(/g;
 // Escapes every regular-expression metacharacter, backslash included (an identifier can only hold `$`
 // today, but a partial escape breaks as soon as the pattern changes).

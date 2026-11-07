@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The same log as log-sample.json, in the NIST SP 1500-101 XML format (default namespace). -->
+<ElectionEventLog xmlns="http://itl.nist.gov/ns/voting/1500-101/v1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <Details>sample</Details>
+  <Device>
+    <Event><Disposition>success</Disposition><Id>polls-opened</Id><Sequence>1</Sequence><TimeStamp>2026-11-03T06:00:00-05:00</TimeStamp><Type>user-action</Type></Event>
+    <Event><Disposition>success</Disposition><Id>vote-cast</Id><Sequence>2</Sequence><TimeStamp>2026-11-03T06:10:00-05:00</TimeStamp><Type>user-action</Type></Event>
+    <Event><Disposition>success</Disposition><Id>vote-cast</Id><Sequence>3</Sequence><TimeStamp>2026-11-03T06:20:00-05:00</TimeStamp><Type>user-action</Type></Event>
+    <Event><Details>paper jam &amp; retry</Details><Disposition>failure</Disposition><Id>vote-cast</Id><Sequence>4</Sequence><TimeStamp>2026-11-03T06:30:00-05:00</TimeStamp><Type>user-action</Type></Event>
+    <Event><Disposition>success</Disposition><Id>ballot-invalidated</Id><Sequence>5</Sequence><TimeStamp>2026-11-03T06:40:00-05:00</TimeStamp><Type>user-action</Type></Event>
+    <Event><Disposition>other</Disposition><Id>diagnostic-error</Id><Sequence>6</Sequence><TimeStamp>2026-11-03T07:00:00-05:00</TimeStamp><Type>user-action</Type></Event>
+    <Event><Disposition>success</Disposition><Id>polls-closed</Id><Sequence>7</Sequence><TimeStamp>2026-11-03T18:00:00-05:00</TimeStamp><Type>user-action</Type></Event>
+    <Id>M-001-A</Id>
+    <Manufacturer>VotingWorks</Manufacturer>
+    <Model>vx-mark-scan</Model>
+    <Type>bmd</Type>
+  </Device>
+  <Device>
+    <Event><Disposition>success</Disposition><Id>polls-opened</Id><Sequence>1</Sequence><TimeStamp>2026-11-03T06:00:00-05:00</TimeStamp><Type>user-action</Type></Event>
+    <Event><Disposition>success</Disposition><Id>vote-cast</Id><Sequence>2</Sequence><TimeStamp>2026-11-03T06:15:00-05:00</TimeStamp><Type>user-action</Type></Event>
+    <Id>M-001-B</Id>
+    <Type>bmd</Type>
+  </Device>
+  <ElectionId>2026-general</ElectionId>
+  <GeneratedTime>2026-11-03T19:05:00-05:00</GeneratedTime>
+</ElectionEventLog>

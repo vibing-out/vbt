@@ -1,0 +1,24 @@
+# Minimal Supabase CLI config for local development (`supabase start`, `supabase db reset`).
+# Production schema changes ship only through supabase/migrations via CI (`supabase db push`, no seed).
+project_id = "vbt"
+
+[api]
+# The schemas the Data API (PostgREST) exposes. Never add `private`: the base tables ballots and
+# ballot_events live there, and a read of them without ORDER BY returns cast order (locked principle 5).
+# The public reads them only through the hash-ordered views in public. The hosted projects must match.
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+
+[db]
+port = 54322
+major_version = 17
+
+[db.seed]
+# Local and test databases only; `supabase db push` does not run it.
+enabled = true
+sql_paths = ["./seed.sql"]
+
+# T-20: officials sign in with email + TOTP (multi-factor). Hosted projects have TOTP on by default.
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true

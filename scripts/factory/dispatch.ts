@@ -425,9 +425,16 @@ async function openSync(epic: Issue, pull: EpicPull, deps: Deps): Promise<'in-fl
   const id = followupId('T-00', epic.subIssues.map((s) => s.title))
   const created = await github.createSubIssue({ title: `${id} ${syncTitle(epic.number)}`, body: syncBody(epic.number, pull), epic: epic.number })
   await github.addLabels(created, ['queued'])
-  await github.comment(pull.number, `This pull request conflicts with \`main\`. Opened #${created} to merge \`main\` into \`epic/${epic.number}\`.`)
   log(`epic #${epic.number}: #${pull.number} conflicts with main; opened sync ticket #${created} (${id})`)
+  // Dispatch first: a label added with GITHUB_TOKEN starts no workflow, so nothing else runs `check`, and a
+  // failure after this point must not leave the ticket queued but never dispatched (#78).
   await check(created, deps)
+  // A courtesy note on the epic pull request; failing to post it doesn't undo the dispatched ticket.
+  try {
+    await github.comment(pull.number, `This pull request conflicts with \`main\`. Opened #${created} to merge \`main\` into \`epic/${epic.number}\`.`)
+  } catch (err) {
+    log(`epic #${epic.number}: could not comment on #${pull.number}: ${err instanceof Error ? err.message : err}`)
+  }
   return 'opened'
 }
 

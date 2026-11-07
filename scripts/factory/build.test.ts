@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
-  branchName, build, decisions, hasSlot, parseClaude, prBody, reviewVerdict, STAGES, verdict, withContract, withoutVerdict,
+  branchName, build, decisions, redacted, run, hasSlot, parseClaude, prBody, reviewVerdict, STAGES, verdict, withContract, withoutVerdict, MAX_REVIEW_ROUNDS,
   type BuildDeps, type Exec, type Stage,
 } from './build.ts'
 import { check as checkReport } from './report.ts'
@@ -115,6 +115,26 @@ describe('reviewVerdict', () => {
   })
 })
 
+describe('redacted', () => {
+  it('removes token-shaped text from error output', () => {
+    expect(redacted('Invalid token sk-ant-oat01-AbC_9-xyz rejected')).toBe('Invalid token sk-ant-[redacted] rejected')
+  })
+})
+
+describe('run', () => {
+  // The T-90 shadow run crashed with an unhandled EPIPE when a command exited before reading its input.
+  it('survives a command that exits without reading its input', async () => {
+    const result = await run('sh', ['-c', 'exit 3'], { input: 'x'.repeat(4 * 1024 * 1024) })
+    expect(result.code).toBe(3)
+  })
+  it('passes input to a command that reads it', async () => {
+    expect((await run('cat', [], { input: 'hello' })).stdout).toBe('hello')
+  })
+  it('runs a command with no input and no stdin', async () => {
+    expect((await run('sh', ['-c', 'cat; echo done'])).stdout).toBe('done\n')
+  })
+})
+
 describe('hasSlot', () => {
   it('lets the oldest two runs work', () => {
     expect(hasSlot([30, 10, 20], 20)).toBe(true)
@@ -134,7 +154,7 @@ const ticket: Issue = {
 // Scripted world: Claude's answer per stage, every command recorded in order.
 function world(
   answers: Partial<Record<Stage, string[]>>,
-  opts: { checksFail?: boolean; inFlight?: string; issue?: Issue; merge?: { code: number; stdout: string }; markers?: boolean } = {},
+  opts: { checksFail?: boolean; inFlight?: string; issue?: Issue; merge?: { code: number; stdout: string }; markers?: boolean; authFails?: boolean } = {},
 ) {
   const calls: string[] = []
   const labels: string[] = []
@@ -143,6 +163,7 @@ function world(
     const line = `${command} ${args.join(' ')}`
     calls.push(line)
     const done = (stdout = '') => ({ code: 0, stdout, stderr: '' })
+    if (command === 'claude' && args.includes('Reply with exactly: OK')) return opts.authFails ? { code: 1, stdout: '', stderr: 'Invalid OAuth token sk-ant-oat01-abc' } : done(claudeJson('OK', ['claude-haiku-5-5']))
     if (command === 'claude' && args.includes('--continue')) return done(claudeJson('still not a report'))
     if (command === 'claude') {
       const stage = (['triage', 'spec', 'implement', 'review', 'sync'] as Stage[]).find((s) => options?.input?.includes(`STAGE:${s}`))!
@@ -204,6 +225,16 @@ describe('build', () => {
     expect(await build(32, { ...w.deps, shadow: true })).toBe('needs-human')
   })
 
+  it('stops with a plain "token rejected" before any stage when Claude Code cannot sign in', async () => {
+    const w = world({}, { authFails: true })
+    expect(await build(32, w.deps)).toBe('needs-human')
+    expect(w.labels).toEqual(['needs-human'])
+    const posted = w.calls.find((c) => c.startsWith('gh issue comment 32'))
+    expect(posted).toBeDefined()
+    expect(w.calls.filter((c) => c.startsWith('claude') && !c.includes('Reply with exactly: OK'))).toEqual([])
+    expect(w.calls.some((c) => c.includes('git/refs'))).toBe(false)
+  })
+
   it('skips a ticket that already has an open pull request', async () => {
     const w = world({}, { inFlight: '34' })
     expect(await build(32, w.deps)).toBe('skipped')
@@ -241,6 +272,19 @@ describe('build', () => {
     expect(w.calls.filter((c) => c.includes('--continue')).length).toBe(1)
   })
 
+  it('stops for a person after two review rounds that still need fixes', async () => {
+    const w = world({
+      triage: ['VERDICT: clean'], spec: ['VERDICT: clean'],
+      implement: ['a\nVERDICT: clean', 'b\nVERDICT: clean', 'c\nVERDICT: clean'],
+      review: [`${OPEN_FIX}\nVERDICT: fixes`, `${OPEN_FIX}\nVERDICT: fixes`, `${EXAMPLE}\nVERDICT: clean`],
+    })
+    expect(MAX_REVIEW_ROUNDS).toBe(2)
+    expect(await build(32, w.deps)).toBe('needs-human')
+    expect(w.calls.filter((c) => c.startsWith('claude') && c.includes('Read,Grep,Glob,WebSearch') && !c.includes('--continue')).length).toBe(4) // triage, spec, 2 reviews
+    expect(w.calls.some((c) => c.startsWith('gh pr merge'))).toBe(false)
+    expect(w.labels).toEqual(['needs-human', 'needs-human'])
+  })
+
   it('stops for a person when checks still fail after two implement attempts', async () => {
     const w = world({ triage: ['VERDICT: clean'], spec: ['VERDICT: clean'], implement: ['a\nVERDICT: fixes', 'b\nVERDICT: fixes'] }, { checksFail: true })
     expect(await build(32, w.deps)).toBe('needs-human')
@@ -256,7 +300,7 @@ describe('build a sync ticket', () => {
   it('merges main, has Claude Code resolve the conflicts, and lands a merge commit without triage, spec or review', async () => {
     const w = world({ sync: ['Kept both keys.\nVERDICT: clean'] }, { issue: sync, merge: conflict })
     expect(await build(60, w.deps)).toBe('merged')
-    const claudeStages = w.calls.filter((c) => c.startsWith('claude'))
+    const claudeStages = w.calls.filter((c) => c.startsWith('claude') && !c.includes('Reply with exactly: OK'))
     expect(claudeStages).toHaveLength(1)
     expect(claudeStages[0]).toContain('Bash(git merge:*)')
     const order = w.calls.filter((c) => /^(git (worktree|merge|commit|push)|gh pr (create|ready|merge))/.test(c))
@@ -275,13 +319,13 @@ describe('build a sync ticket', () => {
   it('skips Claude Code when main merges cleanly and the checks pass', async () => {
     const w = world({}, { issue: sync })
     expect(await build(60, w.deps)).toBe('merged')
-    expect(w.calls.some((c) => c.startsWith('claude'))).toBe(false)
+    expect(w.calls.some((c) => c.startsWith('claude') && !c.includes('Reply with exactly: OK'))).toBe(false)
     expect(w.calls).toContain('gh pr merge 34 --merge')
   })
   it('stops for a person when conflict markers remain after two attempts, and pushes nothing', async () => {
     const w = world({ sync: ['a\nVERDICT: fixes', 'b\nVERDICT: fixes'] }, { issue: sync, merge: conflict, markers: true })
     expect(await build(60, w.deps)).toBe('needs-human')
-    expect(w.calls.filter((c) => c.startsWith('claude'))).toHaveLength(2)
+    expect(w.calls.filter((c) => c.startsWith('claude') && !c.includes('Reply with exactly: OK'))).toHaveLength(2)
     expect(w.calls.some((c) => c.startsWith('sh -c'))).toBe(false)
     expect(w.calls.some((c) => c.startsWith('git push'))).toBe(false)
   })

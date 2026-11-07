@@ -265,6 +265,52 @@ describe("AC7: leaf order", () => {
   });
 });
 
+describe("duplicate ballots, re-signed by an insider with the key", () => {
+  const victimIn = (e: Election, precinct: string) =>
+    e.ballots.find((b) => b.precinct === precinct && b.code !== e.discarded && b.code !== e.openChallenge) as Election["ballots"][number];
+
+  it("a ballot listed twice in a precinct record gives FAIL leaf-order and FAIL ballot-count", async () => {
+    let code = "";
+    const s = await serveCopy((e) => {
+      const r = findRecord(e, P1(), "TALLIED_PRECINCT");
+      code = victimIn(e, P1()).code;
+      const listed = r.ballots.find((b) => b.tracking_code === code) as (typeof r.ballots)[number];
+      r.ballots.push({ ...listed });
+      rebuildAndSign(r, e.signer);
+      const at = r.ballots.findIndex((b) => b.tracking_code === code);
+      forbidden.push(String(at), String(at + 1));
+    });
+    const res = await runCli(recordArgs(s));
+    expect(res.code).toBe(1);
+    const failures = lines(res.out).filter((l) => l.startsWith("FAIL "));
+    expect(failures).toContain(`FAIL leaf-order ${P1()}/TALLIED_PRECINCT: ballots list the same ciphertext hash more than once`);
+    expect(failures).toContain(`FAIL ballot-count ${P1()}/TALLIED_PRECINCT: 1 tracking codes are listed more than once: ${code}`);
+    expect(res.out).toContain(`PASS signature ${P1()}/TALLIED_PRECINCT`);
+    expect(res.out).toContain(`PASS merkle-root ${P1()}/TALLIED_PRECINCT`);
+  });
+
+  it("one tracking code in two precincts and twice in the county gives FAIL ballot-count and FAIL C3", async () => {
+    let code = "";
+    const s = await serveCopy((e) => {
+      code = victimIn(e, P1()).code;
+      const copy = { tracking_code: code, ciphertext_hash: bytesToHex(sha256(new TextEncoder().encode("duplicate"))) };
+      const p2 = findRecord(e, P2(), "TALLIED_PRECINCT");
+      p2.ballots.push({ ...copy });
+      rebuildAndSign(p2, e.signer);
+      const county = findRecord(e, e.county, "REPORTED_UNOFFICIAL");
+      county.ballots.push({ ...copy });
+      rebuildAndSign(county, e.signer);
+    });
+    const res = await runCli(recordArgs(s));
+    expect(res.code).toBe(1);
+    const failures = lines(res.out).filter((l) => l.startsWith("FAIL "));
+    expect(failures).toContain(`FAIL ballot-count ${base.county}/REPORTED_UNOFFICIAL: 1 tracking codes are listed more than once: ${code}`);
+    expect(failures).toContain(`FAIL C3 ${base.county}: 1 tracking codes are listed more than once across precincts: ${code}`);
+    expect(res.out).toContain(`PASS leaf-order ${base.county}/REPORTED_UNOFFICIAL`);
+    expect(res.out).toContain(`PASS signature ${base.county}/REPORTED_UNOFFICIAL`);
+  });
+});
+
 describe("AC8: format errors, network errors and unpublished stages", () => {
   it("a malformed body exits 2 with ERROR <url>: response is not a stage record", async () => {
     const s = await serveCopy();

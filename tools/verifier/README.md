@@ -21,16 +21,16 @@ Run it with `node tools/verifier/src/cli.ts ...` (Node 24 strips the TypeScript 
 
 ## Checks
 
-`record` fetches each precinct's `TALLIED_PRECINCT` record and the county's `REPORTED_UNOFFICIAL`, `CERTIFIED`, `CHALLENGED` and `DISCARDED` records. On each it checks `signature`, `merkle-root`, `leaf-order` (ballots sorted by ciphertext hash) and `ballot-count`, then runs C2, C3 and C4. `code` checks one tracking code's `chain`, and for each proof, the stage record's `signature` and then `inclusion`.
+`record` fetches each precinct's `TALLIED_PRECINCT` record and the county's `REPORTED_UNOFFICIAL`, `CERTIFIED`, `CHALLENGED` and `DISCARDED` records. On each it checks `signature`, `merkle-root`, `leaf-order` (ballots in strictly increasing ciphertext hash order) and `ballot-count` (the count matches and no tracking code is listed twice), then runs C2, C3 and C4. `code` checks one tracking code's `chain`, and for each proof, the stage record's `signature` and then `inclusion`.
 
 | Check | Failure message |
 | --- | --- |
 | `signature` | `FAIL signature <scope_id>/<stage>: signature does not match the stage signing key` |
 | `merkle-root` | `FAIL merkle-root <scope_id>/<stage>: recomputed root <r'> != published root <r>` |
-| `leaf-order` | `FAIL leaf-order <scope_id>/<stage>: ballots are not sorted by ciphertext hash` |
-| `ballot-count` | `FAIL ballot-count <scope_id>/<stage>: ballot_count <n> != <m> ballots listed` |
+| `leaf-order` | `FAIL leaf-order <scope_id>/<stage>: ballots are not sorted by ciphertext hash` / `ballots list the same ciphertext hash more than once` |
+| `ballot-count` | `FAIL ballot-count <scope_id>/<stage>: ballot_count <n> != <m> ballots listed` / `<k> tracking codes are listed more than once: <first 5 codes>` |
 | `c2` | `FAIL C2 <precinct>: contest <c> has <v> votes for <n> ballots` / `total <c>/<choice> is not a non-negative integer` |
-| `c3` | `FAIL C3 <county>: <contest>/<choice> county total <a> != sum of precinct totals <b>` / `ballot_count <a> != sum of precinct ballot counts <b>` / `ballot set differs from its precincts by <k> codes` |
+| `c3` | `FAIL C3 <county>: <contest>/<choice> county total <a> != sum of precinct totals <b>` / `ballot_count <a> != sum of precinct ballot counts <b>` / `ballot set differs from its precincts by <k> codes` / `<k> tracking codes are listed more than once across precincts: <first 5 codes>` |
 | `c4` | `FAIL C4 <county>: <k> ballots missing from certified with no challenge or discard: <first 5 codes>` / `<k> certified ballots are not in the unofficial record` / `<contest>/<choice> certified <a> > unofficial <b>` / `contest <c> lost <d> votes but only <k> ballots were removed` |
 | `chain` | `FAIL chain <code>: first event is not CAST with a null prev_hash` / `event <i> prev_hash does not match the previous event` / `event <i> from_status does not match the previous event's to_status` |
 | `inclusion` | `FAIL inclusion <code> <stage>: proof does not reach the published root` / `code not in <scope_id>/<stage>` |

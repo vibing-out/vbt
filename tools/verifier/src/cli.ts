@@ -128,7 +128,7 @@ const notPublished = (scopeId: string, stage: Stage): Check => skip("published",
 const needs = (scopeId: string, stage: Stage) => `needs ${scopeId}/${stage}, not published`;
 
 async function recordChecks(r: PublishedRecord, deps: Deps, key: Uint8Array | null): Promise<Check[]> {
-  return [await checkSignature(deps.crypto, r, key), checkMerkleRoot(deps.crypto, r), checkLeafOrder(r), checkBallotCount(r)];
+  return [await checkSignature(deps.crypto, r, key), checkMerkleRoot(deps.crypto, r), checkLeafOrder(r), ...checkBallotCount(r)];
 }
 
 async function runRecord(o: Options, deps: Deps): Promise<Check[]> {

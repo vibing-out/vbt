@@ -1,11 +1,12 @@
 // C2 to C4 (docs/locked-interfaces.md § Cross-checks) from the published
 // records alone. The verifier cannot decrypt, so each check compares signed
 // totals, counts and ballot sets. Messages name contests, choices, counts and
-// (for C4) at most five tracking codes, sorted alphabetically.
+// (for C3 and C4) at most five tracking codes, sorted alphabetically.
 
 import type { ContestTotals } from "../crypto.ts";
 import type { PublishedRecord } from "../record.ts";
 import { type Check, outcome } from "../report.ts";
+import { repeatedCodes, repeatedMessage } from "./merkle.ts";
 
 const isCount = (v: number | undefined): v is number => v !== undefined && Number.isSafeInteger(v) && v >= 0;
 
@@ -43,6 +44,7 @@ function setDifference(a: Map<string, string>, b: Map<string, string>): number {
   return k;
 }
 
+/** Collapses a code listed twice in one record; ballot-count fails that record, so C3 and C4 need not repeat it. */
 const ballotMap = (r: PublishedRecord) => new Map(r.ballots.map((b) => [b.tracking_code, b.ciphertext_hash]));
 
 /** C3: the county REPORTED_UNOFFICIAL record is the sum (totals, count) and union (ballots) of its precincts. */
@@ -55,6 +57,9 @@ export function checkC3(precincts: PublishedRecord[], county: PublishedRecord): 
   }
   const sumCount = precincts.reduce((n, p) => n + p.ballot_count, 0);
   if (county.ballot_count !== sumCount) failures.push(`ballot_count ${county.ballot_count} != sum of precinct ballot counts ${sumCount}`);
+  // A code in two precincts would collapse into one entry of the union below.
+  const across = repeatedCodes(precincts.flatMap((p) => [...new Set(p.ballots.map((b) => b.tracking_code))]));
+  if (across.length > 0) failures.push(repeatedMessage(across, " across precincts"));
   const union = new Map<string, string>();
   for (const p of precincts) for (const b of p.ballots) union.set(b.tracking_code, b.ciphertext_hash);
   const k = setDifference(ballotMap(county), union);

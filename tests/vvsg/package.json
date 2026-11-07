@@ -1,0 +1,23 @@
+{
+  "name": "@vbt/vvsg-tests",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/pg": "8.23.1",
+    "@vbt/supabase": "workspace:*",
+    "ajv": "8.20.0",
+    "ajv-draft-04": "1.0.0",
+    "ajv-formats": "3.0.1",
+    "pg": "8.23.1",
+    "typescript": "5.9.3",
+    "vitest": "5.1.0"
+  }
+}

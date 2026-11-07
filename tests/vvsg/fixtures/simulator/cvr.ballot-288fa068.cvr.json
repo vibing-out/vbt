@@ -1,0 +1,168 @@
+{
+  "@type": "CVR.CastVoteRecordReport",
+  "Version": "1.0.0",
+  "GeneratedDate": "2026-11-03T06:00:05.000Z",
+  "ReportType": [
+    "originating-device-export"
+  ],
+  "ReportGeneratingDeviceIds": [
+    "mach-01"
+  ],
+  "ReportingDevice": [
+    {
+      "@id": "mach-01",
+      "@type": "CVR.ReportingDevice",
+      "Application": "vbt-sim-1.0.0",
+      "Manufacturer": "VBT Simulator",
+      "Model": "scan-single",
+      "SerialNumber": "mach-01"
+    }
+  ],
+  "GpUnit": [
+    {
+      "@id": "pct-01",
+      "@type": "CVR.GpUnit",
+      "Type": "precinct",
+      "Name": "Precinct 01",
+      "ReportingDeviceIds": [
+        "mach-01"
+      ]
+    },
+    {
+      "@id": "marion",
+      "@type": "CVR.GpUnit",
+      "Type": "other",
+      "OtherType": "county",
+      "Name": "Marion County"
+    }
+  ],
+  "Election": [
+    {
+      "@id": "marion-general-2026-11-03",
+      "@type": "CVR.Election",
+      "Name": "Marion County General Election, November 3, 2026",
+      "ElectionScopeId": "marion",
+      "Candidate": [
+        {
+          "@id": "cand-a",
+          "@type": "CVR.Candidate",
+          "Name": "Candidate A"
+        },
+        {
+          "@id": "cand-b",
+          "@type": "CVR.Candidate",
+          "Name": "Candidate B"
+        },
+        {
+          "@id": "cand-c",
+          "@type": "CVR.Candidate",
+          "Name": "Candidate C"
+        }
+      ],
+      "Contest": [
+        {
+          "@id": "contest-president",
+          "@type": "CVR.CandidateContest",
+          "Name": "President of the United States",
+          "VotesAllowed": 1,
+          "ContestSelection": [
+            {
+              "@id": "cand-a",
+              "@type": "CVR.CandidateSelection",
+              "CandidateIds": [
+                "cand-a"
+              ]
+            },
+            {
+              "@id": "cand-b",
+              "@type": "CVR.CandidateSelection",
+              "CandidateIds": [
+                "cand-b"
+              ]
+            },
+            {
+              "@id": "cand-c",
+              "@type": "CVR.CandidateSelection",
+              "CandidateIds": [
+                "cand-c"
+              ]
+            }
+          ]
+        },
+        {
+          "@id": "contest-measure-1",
+          "@type": "CVR.BallotMeasureContest",
+          "Name": "Public Question 1",
+          "ContestSelection": [
+            {
+              "@id": "yes",
+              "@type": "CVR.BallotMeasureSelection",
+              "Selection": "Yes"
+            },
+            {
+              "@id": "no",
+              "@type": "CVR.BallotMeasureSelection",
+              "Selection": "No"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "CVR": [
+    {
+      "@type": "CVR.CVR",
+      "UniqueId": "ballot-288fa068",
+      "BallotStyleId": "style-general",
+      "BallotStyleUnitId": "pct-01",
+      "CreatingDeviceId": "mach-01",
+      "ElectionId": "marion-general-2026-11-03",
+      "CurrentSnapshotId": "ballot-288fa068-original",
+      "CVRSnapshot": [
+        {
+          "@id": "ballot-288fa068-original",
+          "@type": "CVR.CVRSnapshot",
+          "Type": "original",
+          "CVRContest": [
+            {
+              "@type": "CVR.CVRContest",
+              "ContestId": "contest-president",
+              "CVRContestSelection": [
+                {
+                  "@type": "CVR.CVRContestSelection",
+                  "ContestSelectionId": "cand-c",
+                  "SelectionPosition": [
+                    {
+                      "@type": "CVR.SelectionPosition",
+                      "HasIndication": "yes",
+                      "IsAllocable": "yes",
+                      "NumberVotes": 1
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "@type": "CVR.CVRContest",
+              "ContestId": "contest-measure-1",
+              "CVRContestSelection": [
+                {
+                  "@type": "CVR.CVRContestSelection",
+                  "ContestSelectionId": "yes",
+                  "SelectionPosition": [
+                    {
+                      "@type": "CVR.SelectionPosition",
+                      "HasIndication": "yes",
+                      "IsAllocable": "yes",
+                      "NumberVotes": 1
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

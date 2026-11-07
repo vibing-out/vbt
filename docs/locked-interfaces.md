@@ -89,6 +89,8 @@ No single system is trusted. At each stage, independent records must agree for e
 | C3 Election-night totals | Election-night report | Sum of precinct totals = county's published election-night totals |
 | C4 Certification | Certification | Certified totals = election-night totals, with every difference explained by a recorded challenge or discard |
 
+Field-level mapping from each format, and which fault fails which check: `docs/nist-mapping.md`. A check also fails when only one record has the machine, precinct or county, or one record has it twice. A failed check challenges only the challengeable ballots (`CAST`, `TALLIED_PRECINCT`, `REPORTED_UNOFFICIAL`) of the machine, precinct or county that failed; C3 names the precinct when the county's election-night report breaks down by precinct (T-10, approved by Austin on #20).
+
 **Privacy rule:** a tracking code is never linked publicly to a timestamped machine event. Machine-level timing stays official-only; the public sees dates, stages, and check results.
 
 ## Event schema (Proposed)
@@ -120,9 +122,14 @@ Table `ballot_events`, insert-only:
 | `batches` | id, scope (precinct or county), from_status, to_status, actor_id, created_at, ballot_count |
 | `stage_records` | id, scope, stage, merkle_root, ballot_count, totals (aggregate only), published_at, signature |
 | `ingest_files` (T-05) | id, sha256 (unique; SHA-256 of the uploaded file's exact bytes), kind, actor_id (uploading official), recorded_at, ballot_count. Insert-only, in the `private` schema, readable by service_role only; never exposed publicly. Added with Austin's approval on [#15](https://github.com/vibing-out/vbt/issues/15#issuecomment-6711512134) |
+| `machine_log_imports` (private, T-10) | id, machine_id, precinct_id, county_id, election_id, format (cdf-json or cdf-xml), file_sha256, ballots_counted, polls_opened, polls_closed, error_count, unmapped_codes, uploaded_by (auth user id), imported_at |
+| `official_results` (private, T-10) | id, scope (precinct or county), scope_id, county_id, stage (TALLIED_PRECINCT, REPORTED_UNOFFICIAL or CERTIFIED), nist_status, totals (aggregate only), ballot_count, file_sha256, uploaded_by (auth user id), imported_at |
+| `check_results` (private, T-10) | id, check_id (C1 to C4), scope (machine, precinct or county), scope_id, stage, passed, failure, mismatches (ids and counts only), batch_id, created_at |
 | sms_subscriptions (stretch, T-18) | id, tracking_code, phone_encrypted, language, created_at, expires_at (certification); deleted on STOP or certification; never exposed publicly or joined to ciphertext |
 
 No table holds a voter's name, ID, date of birth, or signature.
+
+The three T-10 tables are official-only and insert-only: RLS on, grants to `service_role` only (officials reach them through server routes that check role and MFA), never in the Data API. They hold no ballot id, tracking code or machine event time (a machine log is stored as a summary and its file hash); `ballot_events` is unchanged by T-10.
 
 ## API boundaries (Proposed)
 
@@ -136,6 +143,43 @@ No table holds a voter's name, ID, date of birth, or signature.
 | `GET /api/reports/mismatches` | Official | Supabase Auth | Mismatch list |
 | `POST /api/official/demo/runs?set={id}` | State official, or county official scoped to the set's county (T-22; approved by Austin on #49) | Supabase Auth with MFA, role-checked | Streamed step results (NDJSON); 409 if the set has already run |
 | POST /api/sms/inbound | SMS provider webhook | Provider signature | Reply text; handles check, TRACK, YES, STOP, HELP |
+
+### Public JSON shapes (approved additive refinement, T-15)
+
+These shapes add detail to the two public rows above; they remove or rename nothing. All hashes, roots and signatures are lowercase hex. Dates are `YYYY-MM-DD` only, never a time. Neither response ever carries a ciphertext, a leaf index, a time or sequence, or any voter identity.
+
+`GET /api/record/{scope}/{stage}`: `{scope}` in the path is the record's `scope_id`; `stage` is `TALLIED_PRECINCT` (per precinct), or `REPORTED_UNOFFICIAL`, `CERTIFIED`, `CHALLENGED` or `DISCARDED` (per county). 404 means not published yet.
+
+```json
+{
+  "scope": "precinct | county",
+  "scope_id": "precinct-1",
+  "stage": "TALLIED_PRECINCT",
+  "merkle_root": "<64 hex>",
+  "ballot_count": 2500,
+  "totals": { "<contestId>": { "<choiceId>": 1234 } },
+  "published_on": "2026-11-03",
+  "signature": "<128 hex: Ed25519 over the stage record>",
+  "ballots": [{ "tracking_code": "RIVER-MAPLE-7Q4K-HAWK", "ciphertext_hash": "<64 hex>" }]
+}
+```
+
+- `ballots` is listed in ascending `ciphertext_hash` order, never in casting order. Merkle leaves are the 32 bytes of each `ciphertext_hash`, in that order, built with `buildMerkleTree` from `packages/crypto`.
+- `signature` is `signStageRecord({ scope: scope_id, stage, merkleRoot: merkle_root, ballotCount: ballot_count, totals })`. The signed `scope` is the `scope_id`.
+
+`GET /api/track/{code}`:
+
+```json
+{
+  "status": "CERTIFIED",
+  "ciphertext_hash": "<64 hex>",
+  "events": [{ "event_type": "CAST", "from_status": null, "to_status": "CAST", "date": "2026-11-03", "prev_hash": null, "hash": "<64 hex>" }],
+  "proofs": [{ "scope_id": "precinct-1", "stage": "TALLIED_PRECINCT", "path": [{ "side": "left | right", "hash": "<64 hex>" }] }]
+}
+```
+
+- `status` and `ciphertext_hash` are the locked row's status and ciphertext hash. `events` is the dated timeline, oldest first; the first event has `prev_hash: null`, and each later `prev_hash` is the previous event's `hash`.
+- `proofs` holds one inclusion proof for each published record that lists the code. `path` is the sibling hashes from the leaf up to the root, the steps of an `InclusionProof` without its `leafIndex`.
 
 ## Stack and repo layout (Proposed)
 

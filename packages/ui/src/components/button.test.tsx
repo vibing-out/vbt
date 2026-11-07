@@ -63,10 +63,11 @@ describe("Button", () => {
   });
 });
 
-test("inverse buttons (on dark heroes) switch the focus ring to on-inverse", () => {
+test("inverse buttons (on dark heroes) switch the focus ring to focus-inverse", () => {
   render(<Button inverse>Track</Button>);
   const cls = screen.getByRole("button").className.split(" ");
-  expect(cls).toContain("focus-visible:outline-on-inverse");
+  expect(cls).toContain("focus-visible:outline-focus-inverse");
+  expect(cls).not.toContain("focus-visible:outline-on-inverse");
   expect(cls).not.toContain("focus-visible:outline-focus");
   expect(cls).toContain("focus-visible:outline-2");
 });

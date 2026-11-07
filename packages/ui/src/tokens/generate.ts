@@ -45,6 +45,16 @@ function typeLines(style: TypeStyle): string[] {
   return lines;
 }
 
+/**
+ * Tailwind theme variable for a motion token: duration-* feeds the `duration-*` utilities
+ * (namespace --transition-duration), ease-* feeds `ease-*` (namespace --ease).
+ */
+export function motionThemeVariable(name: string): string {
+  if (name.startsWith("duration-")) return `--transition-${name}`;
+  if (name.startsWith("ease-")) return `--${name}`;
+  throw new Error(`Motion token "${name}" should start with "duration-" or "ease-"`);
+}
+
 function block(selector: string, lines: string[]): string {
   return `${selector} {\n${lines.map((line) => `  ${line}`).join("\n")}\n}`;
 }
@@ -52,6 +62,7 @@ function block(selector: string, lines: string[]): string {
 export function generateTokensCss(tokens: TokenFile): string {
   const colors = tokens.color.tokens;
   const shadows = tokens.shadow.tokens;
+  const motion = tokens.motion.tokens;
 
   const root = block(":root", [
     "color-scheme: light;",
@@ -59,6 +70,7 @@ export function generateTokensCss(tokens: TokenFile): string {
     ...shadows.map((s) => `--vbt-${s.name}: ${s.value.light};`),
     ...tokens.radius.tokens.map((r) => `--vbt-${r.name}: ${r.value};`),
     ...tokens.spacing.tokens.map((s) => `--vbt-${s.name}: ${s.value};`),
+    ...motion.map((m) => `--vbt-${m.name}: ${m.value};`),
     `--vbt-font-sans: ${loaderFamilyStack(tokens.type.families.sans)};`,
     `--vbt-font-mono: ${loaderFamilyStack(tokens.type.families.mono)};`,
   ]);
@@ -75,6 +87,7 @@ export function generateTokensCss(tokens: TokenFile): string {
     ...colors.map((c) => `--color-${c.name}: var(--vbt-${c.name});`),
     ...tokens.radius.tokens.map((r) => `--radius-${stripPrefix(r.name, "radius-")}: var(--vbt-${r.name});`),
     ...shadows.map((s) => `--shadow-${stripPrefix(s.name, "shadow-")}: var(--vbt-${s.name});`),
+    ...motion.map((m) => `${motionThemeVariable(m.name)}: var(--vbt-${m.name});`),
     "--font-sans: var(--vbt-font-sans);",
     "--font-mono: var(--vbt-font-mono);",
     ...tokens.type.groups.flatMap((group) => group.styles.flatMap(typeLines)),

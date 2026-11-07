@@ -1,7 +1,7 @@
 import tokensJson from "./tokens.json";
 import type { ThemeId, TokenFile } from "./types";
 
-export type { ColorToken, ThemeId, TokenFile, TypeGroup, TypeStyle } from "./types";
+export type { ColorToken, ContrastPair, ThemeId, TokenFile, TypeGroup, TypeStyle } from "./types";
 
 export const tokens = tokensJson as TokenFile;
 
@@ -19,6 +19,7 @@ export const COLOR_NAMES = [
   "accent-text",
   "on-accent",
   "focus",
+  "focus-inverse",
   "stage-done",
   "accent-tint",
   "surface-inverse",

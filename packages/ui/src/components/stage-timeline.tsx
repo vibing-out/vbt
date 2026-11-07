@@ -85,7 +85,7 @@ const STATE_WORD: Record<StageState, string> = { done: "done", current: "current
 
 /** Only the newly completed circle animates. */
 const NEW_MOTION =
-  "transition-colors duration-200 ease-out animate-in fade-in zoom-in-75 motion-reduce:transition-none motion-reduce:animate-none";
+  "transition-colors duration-base ease-out animate-in fade-in zoom-in-75 motion-reduce:transition-none motion-reduce:animate-none";
 
 function OffPathBadge({ offPath, mode }: { offPath: OffPath; mode: Mode }) {
   return offPath.status === "SPOILED" ? (

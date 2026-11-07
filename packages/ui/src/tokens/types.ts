@@ -36,6 +36,15 @@ export interface ShadowToken {
   usage: string;
 }
 
+export interface ContrastPair {
+  fg: string;
+  bg: string;
+  /** WCAG minimum: 4.5 for text, 3 for non-text marks. */
+  min: number;
+  /** Themes to check; every theme when absent (as in docs/design-system/scripts/check-contrast.mjs). */
+  themes?: ThemeId[];
+}
+
 export interface TokenFile {
   name: string;
   version: number;
@@ -44,4 +53,6 @@ export interface TokenFile {
   spacing: { tokens: SimpleToken[] };
   radius: { tokens: SimpleToken[] };
   shadow: { tokens: ShadowToken[] };
+  contrast: { standard: string; check: string; pairs: ContrastPair[] };
+  motion: { tokens: SimpleToken[] };
 }

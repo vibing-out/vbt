@@ -1,6 +1,8 @@
 // Every foreground/background token pair the components use, with its WCAG minimum.
 // contrast.test.ts checks each one in the light and dark themes. A component may only put a color
 // on a background if the pair is listed here. Every text pair is held to 4.5:1, whatever its size.
+// Every pair here must also appear in tokens.json contrast.pairs at the same minimum or higher
+// (contrast.test.ts checks it); pairs the approved docs file lacks are logged in tokens/overrides.ts.
 
 import type { ColorName } from "../tokens";
 import { MIN_NON_TEXT, MIN_TEXT } from "./contrast";
@@ -54,7 +56,9 @@ export const colorPairs: readonly ColorPair[] = [
     mark("status-discarded", bg, "invalid input ring"),
     mark("ink", bg, "done segment in the compact bar"),
   ]),
-  mark("on-inverse", "surface-inverse", "focus ring and done rail circle on dark heroes"),
+  mark("focus-inverse", "surface-inverse", "focus ring on dark heroes, the receipt pass and the scanner panel"),
+  mark("on-inverse", "surface-inverse", "done rail circle on dark heroes"),
   mark("on-inverse-muted", "surface-inverse", "upcoming rail circle ring, tear line"),
-  mark("brand-orange", "surface-inverse", "current rail circle, scanner corner brackets"),
+  // The approved pairs hold brand-orange on surface-inverse to 4.5:1: it is also the current-stage label there.
+  text("brand-orange", "surface-inverse", "current rail circle, scanner corner brackets"),
 ];

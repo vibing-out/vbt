@@ -24,9 +24,9 @@ export const buttonVariants = cva(
         voter: "min-h-11 px-6 py-2 text-body-lg",
         admin: "min-h-9 px-4 py-1 text-body",
       },
-      // On surface-inverse the focus token is too close to the fill (2.5:1 light); on-inverse keeps 3:1.
+      // On surface-inverse the focus token is too dark to see (2.5:1 light); focus-inverse is made for it.
       inverse: {
-        true: "focus-visible:outline-on-inverse",
+        true: "focus-visible:outline-focus-inverse",
         false: "",
       },
     },

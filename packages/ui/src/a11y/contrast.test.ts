@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, test } from "vitest";
-import { colorValue, COLOR_NAMES, type ThemeId } from "../tokens";
+import { colorValue, COLOR_NAMES, type ColorName, type ThemeId, tokens } from "../tokens";
 import { contrastRatio, hexToRgb, MIN_NON_TEXT, MIN_TEXT } from "./contrast";
 import { colorPairs } from "./pairs";
 
@@ -31,6 +31,31 @@ describe("every color pair the components use meets WCAG AA in both themes", () 
   );
 });
 
+describe("every pair in tokens.json contrast.pairs (the approved pairs plus logged overrides) passes", () => {
+  const themes = (t?: ThemeId[]) => t ?? tokens.color.themes.map((x) => x.id);
+  test.each(tokens.contrast.pairs.flatMap((p) => themes(p.themes).map((theme) => ({ ...p, theme }))))(
+    "$fg on $bg ($theme) >= $min",
+    ({ fg, bg, min, theme }) => {
+      expect(COLOR_NAMES).toContain(fg);
+      expect(COLOR_NAMES).toContain(bg);
+      expect(contrastRatio(colorValue(fg as ColorName, theme), colorValue(bg as ColorName, theme))).toBeGreaterThanOrEqual(
+        min,
+      );
+    },
+  );
+});
+
+describe("pairs.ts and tokens.json contrast.pairs agree", () => {
+  test.each(colorPairs.map((p) => ({ ...p })))("$fg on $bg (min $min) is in contrast.pairs", ({ fg, bg, min }) => {
+    const listed = tokens.contrast.pairs.find((p) => p.fg === fg && p.bg === bg);
+    expect(listed, `${fg} on ${bg} missing from tokens.json contrast.pairs`).toBeDefined();
+    // The approved pair is held at least as high as the component needs.
+    expect(listed?.min ?? 0).toBeGreaterThanOrEqual(min);
+    // Checked in every theme, as the components render in both.
+    expect(listed?.themes).toBeUndefined();
+  });
+});
+
 describe("the pair table covers what the plan requires", () => {
   const has = (fg: string, bg: string, min: number) =>
     colorPairs.some((p) => p.fg === fg && p.bg === bg && p.min >= min);
@@ -53,7 +78,8 @@ describe("the pair table covers what the plan requires", () => {
       ["accent-mark", bg, MIN_NON_TEXT],
       ["focus", bg, MIN_NON_TEXT],
     ]),
-    ["brand-orange", "surface-inverse", MIN_NON_TEXT],
+    ["brand-orange", "surface-inverse", MIN_TEXT],
+    ["focus-inverse", "surface-inverse", MIN_NON_TEXT],
     ["on-inverse", "surface-inverse", MIN_NON_TEXT],
   ] as [string, string, number][])("%s on %s >= %s", (fg, bg, min) => {
     expect(has(fg, bg, min)).toBe(true);

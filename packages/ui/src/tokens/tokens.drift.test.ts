@@ -22,6 +22,11 @@ function setPointer(root: unknown, pointer: string, value: unknown): void {
     if (!(part in node)) throw new Error(`Pointer "${pointer}" not found at "${part}"`);
     node = node[part] as Record<string, unknown>;
   }
+  if (last === "-") {
+    if (!Array.isArray(node)) throw new Error(`Pointer "${pointer}" appends to a non-array`);
+    node.push(value);
+    return;
+  }
   if (!(last in node)) throw new Error(`Pointer "${pointer}" not found at "${last}"`);
   node[last] = value;
 }
@@ -53,5 +58,19 @@ describe("tokens.json copy", () => {
     expect(result).toEqual({ color: { tokens: [{ name: "ink", value: { light: "#111111" } }] } });
     expect(source.color.tokens[0]?.value.light).toBe("#000000");
     expect(() => applyOverrides(source, [{ pointer: "/color/nope", value: 1, reason: "r", decision: "d" }])).toThrow();
+  });
+
+  test("a final \"-\" appends to an array, and only to an array", () => {
+    const source = { pairs: [{ fg: "ink" }] };
+    const result = applyOverrides(source, [{ pointer: "/pairs/-", value: { fg: "focus" }, reason: "r", decision: "d" }]);
+    expect(result).toEqual({ pairs: [{ fg: "ink" }, { fg: "focus" }] });
+    expect(source.pairs).toHaveLength(1);
+    expect(() => applyOverrides(source, [{ pointer: "/-", value: 1, reason: "r", decision: "d" }])).toThrow();
+  });
+
+  test("every override names a ratio it measured, so the log carries the evidence", () => {
+    for (const o of overrides.filter((x) => x.pointer.startsWith("/contrast/pairs"))) {
+      expect(o.reason).toMatch(/\d+\.\d{2}:1 light, \d+\.\d{2}:1 dark/);
+    }
   });
 });

@@ -53,7 +53,7 @@ export function CopyCode({
         aria-label={copied ? copiedLabel : copyLabel}
         className={cn(
           "inline-flex shrink-0 cursor-pointer items-center justify-center rounded-sm text-on-inverse",
-          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-on-inverse",
+          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-inverse",
           mode === "admin" ? "size-9" : "size-11",
         )}
       >

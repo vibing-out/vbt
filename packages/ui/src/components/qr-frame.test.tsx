@@ -34,8 +34,9 @@ describe("QrFrame", () => {
     const button = screen.getByRole("button", { name: "Type the code instead" });
     expect(button.className).toContain("min-h-11");
     // The focus ring stays visible on the dark panel.
-    expect(button.className).toContain("focus-visible:outline-on-inverse");
-    expect(button.className).not.toContain("focus-visible:outline-focus");
+    const cls = button.className.split(" ");
+    expect(cls).toContain("focus-visible:outline-focus-inverse");
+    expect(cls).not.toContain("focus-visible:outline-focus");
     fireEvent.click(button);
     expect(onManualEntry).toHaveBeenCalledTimes(1);
   });

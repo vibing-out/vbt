@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
-import { generateTokensCss, loaderFamilyStack, pxToRem } from "./generate";
+import { generateTokensCss, loaderFamilyStack, motionThemeVariable, pxToRem } from "./generate";
 import { COLOR_NAMES, tokens } from "./index";
 
 const css = readFileSync(new URL("../styles/tokens.css", import.meta.url), "utf8");
@@ -68,6 +68,20 @@ describe("tokens.css", () => {
     expect(tokens.spacing.tokens.map((s) => s.name)).toEqual([1, 2, 3, 4, 6, 8, 12].map((n) => `space-${n}`));
   });
 
+  test("defines every motion token and maps it to Tailwind's duration-* and ease-* utilities", () => {
+    const root = blockBody(":root");
+    const theme = blockBody("@theme inline");
+    expect(tokens.motion.tokens.map((m) => m.name)).toEqual(["duration-fast", "duration-base", "duration-slow", "ease-out"]);
+    for (const m of tokens.motion.tokens) expect(root).toContain(`--vbt-${m.name}: ${m.value};`);
+    expect(theme).toContain("--transition-duration-base: var(--vbt-duration-base);");
+    expect(theme).toContain("--ease-out: var(--vbt-ease-out);");
+  });
+
+  test("focus-inverse is a color in both themes", () => {
+    expect(blockBody(":root")).toContain("--vbt-focus-inverse: #8FB0FF;");
+    expect(blockBody("@theme inline")).toContain("--color-focus-inverse: var(--vbt-focus-inverse);");
+  });
+
   test("the status headline is the 32px display token", () => {
     expect(css).toContain("--text-display: 2rem;");
   });
@@ -78,6 +92,12 @@ describe("generator helpers", () => {
     expect(pxToRem("32px")).toBe("2rem");
     expect(pxToRem("13px")).toBe("0.8125rem");
     expect(() => pxToRem("2rem")).toThrow();
+  });
+
+  test("motionThemeVariable", () => {
+    expect(motionThemeVariable("duration-fast")).toBe("--transition-duration-fast");
+    expect(motionThemeVariable("ease-out")).toBe("--ease-out");
+    expect(() => motionThemeVariable("bounce")).toThrow();
   });
 
   test("loaderFamilyStack puts the loader variable first", () => {

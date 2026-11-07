@@ -77,7 +77,7 @@ describe.each(FORMS)("StageTimeline $form", (props) => {
     const animated = root(container).querySelectorAll<HTMLElement>('[data-new="true"]');
     expect(animated).toHaveLength(1);
     const cls = animated[0]!.className.split(" ");
-    expect(cls).toEqual(expect.arrayContaining(["duration-200", "ease-out", "motion-reduce:transition-none"]));
+    expect(cls).toEqual(expect.arrayContaining(["duration-base", "ease-out", "motion-reduce:transition-none"]));
     expect(animated[0]!.getAttribute("aria-label")).toMatch(/, done$/);
   });
 });

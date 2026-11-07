@@ -18,6 +18,7 @@
   --vbt-accent-text: #A84A14;
   --vbt-on-accent: #14213D;
   --vbt-focus: #2B59C3;
+  --vbt-focus-inverse: #8FB0FF;
   --vbt-stage-done: #C9D3E3;
   --vbt-accent-tint: #FBE9DA;
   --vbt-surface-inverse: #14213D;
@@ -42,6 +43,10 @@
   --vbt-space-6: 24px;
   --vbt-space-8: 32px;
   --vbt-space-12: 48px;
+  --vbt-duration-fast: 120ms;
+  --vbt-duration-base: 200ms;
+  --vbt-duration-slow: 320ms;
+  --vbt-ease-out: cubic-bezier(0.2, 0, 0, 1);
   --vbt-font-sans: var(--font-instrument-sans, "Instrument Sans"), "Helvetica Neue", Arial, system-ui, sans-serif;
   --vbt-font-mono: var(--font-jetbrains-mono, "JetBrains Mono"), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -60,6 +65,7 @@
   --vbt-accent-text: #F5A15F;
   --vbt-on-accent: #14213D;
   --vbt-focus: #8FB0FF;
+  --vbt-focus-inverse: #8FB0FF;
   --vbt-stage-done: #2A3A5C;
   --vbt-accent-tint: #3A2414;
   --vbt-surface-inverse: #22304F;
@@ -89,6 +95,7 @@
   --color-accent-text: var(--vbt-accent-text);
   --color-on-accent: var(--vbt-on-accent);
   --color-focus: var(--vbt-focus);
+  --color-focus-inverse: var(--vbt-focus-inverse);
   --color-stage-done: var(--vbt-stage-done);
   --color-accent-tint: var(--vbt-accent-tint);
   --color-surface-inverse: var(--vbt-surface-inverse);
@@ -106,6 +113,10 @@
   --radius-pill: var(--vbt-radius-pill);
   --shadow-card: var(--vbt-shadow-card);
   --shadow-overlay: var(--vbt-shadow-overlay);
+  --transition-duration-fast: var(--vbt-duration-fast);
+  --transition-duration-base: var(--vbt-duration-base);
+  --transition-duration-slow: var(--vbt-duration-slow);
+  --ease-out: var(--vbt-ease-out);
   --font-sans: var(--vbt-font-sans);
   --font-mono: var(--vbt-font-mono);
   --text-display: 2rem;

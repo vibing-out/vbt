@@ -142,3 +142,16 @@ test("no sign-up, email or phone fields @smoke", async ({ page }) => {
   await page.goto("/track");
   await expect(page.locator("input, textarea, select")).toHaveCount(1);
 });
+
+test("/ opens the tracker, and a demo code works through the real route @smoke", async ({ page }) => {
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/track$/);
+  await page.getByLabel("Tracking code").fill("bachelor random ertx category");
+  await page.getByRole("button", { name: "Track ballot" }).click();
+  await expect(page).toHaveURL(/\/track\/BACHELOR-RANDOM-ERTX-CATEGORY$/);
+  await expect(page.getByTestId("current-status")).toHaveText("Included in certified results");
+  await expect(page.getByTestId("stage-check")).toHaveCount(3);
+  await page.getByRole("link", { name: "View the paper receipt" }).click();
+  await expect(page).toHaveURL(/\/receipt\/BACHELOR-RANDOM-ERTX-CATEGORY$/);
+  await expect(page.getByTestId("receipt-qr").locator("svg")).toBeVisible();
+});

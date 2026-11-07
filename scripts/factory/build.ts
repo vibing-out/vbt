@@ -278,6 +278,7 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
     await deps.landed(pr)
   }
 
+  let pr = 0 // the ticket's pull request, once opened
   try {
     // Wait for a slot, so at most MAX_PARALLEL_TICKETS Opus tickets share the subscription's limits.
     for (;;) {
@@ -381,7 +382,7 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
       const body = prBody({ ticket: number, summary: `${summary.trim()}\n\n${note}`, checks, modelsLines, rounds: [], decisions: [], runUrl })
       await ok('node', ['scripts/context.ts', 'check'], { input: body, cwd: REPO_ROOT })
       const url = await ok('gh', ['pr', 'create', '--draft', '--base', epicBranch, '--head', branch, '--label', 'factory:vbt', '--title', issue.title, '--body-file', '-'], { input: body })
-      const pr = Number(/\/pull\/(\d+)/.exec(url)?.[1])
+      pr = Number(/\/pull\/(\d+)/.exec(url)?.[1])
       await github.dispatchWorkflow('ci.yml', branch)
       await github.dispatchWorkflow('factory.yml', branch, { pr: String(pr) })
       await land(pr, '--merge')
@@ -425,7 +426,6 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
     let findings = ''
     let summary = ''
     let checks = ''
-    let pr = 0
     for (let round = 1; ; round++) {
       // Implement (or fix), with one retry when lint, type check or tests fail.
       for (let attempt = 1; ; attempt++) {
@@ -503,6 +503,14 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
     return 'merged'
   } catch (err) {
     if (err instanceof Stop) return 'needs-human'
+    // Every ticket ends merged or with needs-human, as with the Warp Foreman: an unexpected failure (a GitHub
+    // error, a crashed command) is reported on the ticket and its pull request, then still fails the job.
+    const message = err instanceof Error ? err.message : String(err)
+    try {
+      await stopForHuman(pr ? [number, pr] : [number], `the runner failed:\n\n\`\`\`text\n${message.slice(0, 3000)}\n\`\`\``)
+    } catch (reported) {
+      if (!(reported instanceof Stop)) log(`#${number}: could not report the failure: ${reported instanceof Error ? reported.message : reported}`)
+    }
     throw err
   }
 }

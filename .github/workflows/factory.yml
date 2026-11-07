@@ -1,12 +1,12 @@
 # The factory's deterministic routing: each job runs one subcommand of scripts/factory/dispatch.ts.
 #   check          a ticket gets `queued`: post earlier context, then label factory-ready (Warp's trigger) or blocked
 #   landed         a pull request merges into epic/*: log its context-log block, close the ticket, re-check what it blocked,
-#                  and once the epic's last ticket closes, update the epic pull request from main and mark it ready;
+#                  and once the epic's last ticket closes, mark the epic pull request ready;
 #                  into main: log its context-log block only (setup work and epic roll-ups)
 #   unblock        an issue closes: re-check the blocked issues it held back (for an epic, those waiting on any of its tickets)
 #   context-check  a pull request into epic/* or main opens or changes: its body needs one valid context-log block
 #                  (a required check), and an epic/* one also needs one `Ticket: #n` line naming an open ticket; `landed` also dispatches it
-#                  (workflow_dispatch, input `pr`) after updating an epic branch, since that push starts no workflow.
+#                  (workflow_dispatch, input `pr`) on an epic branch whose head GITHUB_TOKEN merged, which starts no workflow.
 #                  On a merge queue entry (merge_group) it checks the queued pull request, read from the entry's ref,
 #                  so the body `landed` logs is valid at merge time. No other job runs on merge_group.
 #   notify         an issue gets `needs-human` (from a person or Warp's GitHub app): post it to the team Slack channel.
@@ -37,7 +37,7 @@ on:
   push:
     branches: [main]
   # Runs only `context-check`, for the pull request whose head is the dispatched branch. dispatch.ts landed
-  # starts it on epic/<n> after updating that branch with GITHUB_TOKEN, a push that starts no workflow.
+  # starts it on epic/<n> when marking it ready, since a merge made with GITHUB_TOKEN starts no workflow.
   workflow_dispatch:
     inputs:
       pr:
@@ -84,11 +84,11 @@ jobs:
     concurrency:
       group: factory-landed-${{ github.event.pull_request.number }}
     # Writes beyond the workflow default, for the epic pull request once its last ticket lands:
-    # contents to merge main into epic/<n> (update-branch), pull-requests to mark it ready for review,
-    # actions to dispatch ci.yml and factory.yml on the updated branch so its required checks run.
+    # pull-requests to mark it ready for review, actions to dispatch ci.yml and factory.yml on the epic
+    # branch so its required checks run. Contents stays read-only: nothing here writes to epic/<n>.
     permissions:
       issues: write
-      contents: write
+      contents: read
       pull-requests: write
       actions: write
     runs-on: ubuntu-latest

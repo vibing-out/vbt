@@ -225,6 +225,19 @@ describe('build', () => {
     expect(await build(32, { ...w.deps, shadow: true })).toBe('needs-human')
   })
 
+  it('reports an unexpected failure on the ticket with needs-human, then still fails', async () => {
+    const w = world({})
+    const exec = w.deps.exec
+    w.deps.exec = async (command, args, options) =>
+      command === 'git' && args[0] === 'ls-remote' ? { code: 0, stdout: '', stderr: '' }
+      : command === 'gh' && args.includes('ref=refs/heads/epic/4') ? { code: 1, stdout: '', stderr: 'gh: Reference update failed (HTTP 422)' }
+      : exec(command, args, options)
+    await expect(build(32, w.deps)).rejects.toThrow('Reference update failed')
+    expect(w.labels).toEqual(['needs-human'])
+    expect(w.calls).toContain('notify')
+    expect(w.calls.some((c) => c.startsWith('gh issue comment 32'))).toBe(true)
+  })
+
   it('stops with a plain "token rejected" before any stage when Claude Code cannot sign in', async () => {
     const w = world({}, { authFails: true })
     expect(await build(32, w.deps)).toBe('needs-human')

@@ -36,7 +36,8 @@ const READ_ONLY = { allowed: 'Read,Grep,Glob,WebSearch,WebFetch', disallowed: 'E
 export const TOOLS: Record<Stage, { allowed: string; disallowed: string }> = {
   triage: READ_ONLY,
   spec: READ_ONLY,
-  review: READ_ONLY,
+  // Review also runs three focused passes as subagents (Task); they inherit the disallowed list, so stay read-only.
+  review: { allowed: `${READ_ONLY.allowed},Task`, disallowed: READ_ONLY.disallowed },
   implement: { allowed: 'Read,Edit,Write,Glob,Grep,Bash', disallowed: 'Bash(git push:*),Bash(git commit:*),Bash(gh:*)' },
 }
 

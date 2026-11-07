@@ -52,6 +52,18 @@ The context log is an insert-only table in the Supabase project `vbt-context-log
 - Database changes go only through migration files in `supabase/migrations/`. Agents can't run `supabase db push` or change Vercel environment variables (blocked in `.claude/settings.json`). Ask your human.
 - Stay inside the area your ticket owns (the ownership table in `docs/STATE.md`). A locked interface changes only with Shawn's or Austin's approval, recorded as a decision in the `context-log` block.
 
+## Election invariants
+
+Reviews check every pull request against these; a break is a high-severity finding. They restate the locked principles in `docs/locked-interfaces.md`, which wins if the two ever differ.
+
+- **No voter identity:** no table, column, log line, error message or export holds a voter's name, ID, date of birth, signature or phone number next to a tracking code.
+- **No ordering leaks:** public views, APIs and logs show the date of casting, never the time or sequence.
+- **Append-only history:** `ballot_events` and `stage_records` reject updates and deletes; each event chains the previous event's hash. No migration weakens either.
+- **Row-level security everywhere:** every new table or view has RLS or `security_invoker`, and public grants match `docs/locked-interfaces.md`. Ballots and events stay out of the Data API.
+- **Records stay verifiable:** signing, Merkle roots and hash chains change only in `packages/crypto`, and a test proves that altering one ciphertext or total breaks verification.
+- **One-way data flow:** no code calls out to a voting system; ingest is only an authenticated official's file upload.
+- **Official actions need MFA:** every official route checks role and MFA.
+
 ## While working and when finishing
 
 - Build only against `docs/locked-interfaces.md`, the repo copy of the playbook's Locked interfaces. The voter journey and receipt mockup are in `docs/voter-journey.md`.

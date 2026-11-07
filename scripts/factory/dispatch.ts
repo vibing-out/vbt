@@ -6,13 +6,14 @@
 //   node scripts/factory/dispatch.ts unblock <issue>       on an issue closing: re-check what it blocked
 //   node scripts/factory/dispatch.ts context-check <pr>    on epic/* and main pull requests: validate the body
 //   node scripts/factory/dispatch.ts notify <issue>        on `needs-human`: post the issue to the team Slack channel
+//   node scripts/factory/dispatch.ts resume <issue>        on `needs-human` removed by a person: re-queue it with `check`
 // Reads GITHUB_TOKEN and GITHUB_REPOSITORY (owner/name) from the environment, and SLACK_WEBHOOK_URL for
-// `notify` and `landed` (unset or empty means no Slack post). `check` and `landed` call scripts/context.ts,
+// `notify` and `landed` (unset or empty means no Slack post). `check`, `landed` and `resume` call scripts/context.ts,
 // which reads its own sign-in variables (see that file).
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
-const USAGE = 'usage: node dispatch.ts <check <issue> | landed <pr> | unblock <issue> | context-check <pr> | notify <issue>>'
+const USAGE = 'usage: node dispatch.ts <check <issue> | landed <pr> | unblock <issue> | context-check <pr> | notify <issue> | resume <issue>>'
 const CONTEXT_TS = fileURLToPath(new URL('../context.ts', import.meta.url))
 const COMMENT_LIMIT = 60_000 // GitHub rejects comments over 65,536 characters
 const NEEDS_HUMAN = 'needs-human'
@@ -42,6 +43,8 @@ export type LabelNotice = {
   labeledBy: string | null
   comment: { author: string | null; body: string; url: string } | null
 }
+// Who acted on an issue. `type` is GitHub's actor type (`User`, `Bot`, `Mannequin`, ...).
+export type Actor = { login: string; type: string }
 
 export interface GitHub {
   issue(number: number): Promise<Issue>
@@ -51,6 +54,8 @@ export interface GitHub {
   removeLabel(number: number, label: string): Promise<void>
   close(number: number): Promise<void>
   labelNotice(number: number, label: string): Promise<LabelNotice>
+  // Who removed `label` most recently, or null when it was never removed or GitHub has no actor.
+  unlabeledBy(number: number, label: string): Promise<Actor | null>
   // The open pull request whose head is `epic/<n>` and whose base is `main`, or null when none is open.
   epicPull(epicNumber: number): Promise<EpicPull | null>
   // Merges `main` into the pull request's branch when it is behind; false when it was already current.
@@ -102,6 +107,16 @@ export function readiness(issue: Issue): { ready: true } | { ready: false; reaso
   const waiting = issue.blockedBy.map((b) => blockerWait(b, epicNumber)).filter((w) => w !== null)
   if (waiting.length) return { ready: false, reason: `blocked by ${waiting.join(', ')}` }
   return { ready: true }
+}
+
+// Why `resume` should leave this issue alone, or null when a person removed `needs-human` from an open ticket.
+// An unknown actor (a deleted account) is skipped too: only a removal known to be a person's resumes.
+export function resumeSkipReason(issue: Issue, removedBy: Actor | null): string | null {
+  if (issue.labels.includes('epic')) return 'it is an epic'
+  if (issue.state !== 'OPEN') return 'it is closed'
+  if (issue.labels.includes(NEEDS_HUMAN)) return `it has ${NEEDS_HUMAN} again`
+  if (removedBy?.type !== 'User') return `${NEEDS_HUMAN} was removed by ${removedBy ? `${removedBy.type} ${removedBy.login}` : 'an unknown actor'}, not a person`
+  return null
 }
 
 // The ticket id at the start of an issue title ("T-02 Domain package" -> "T-02"), used as the
@@ -190,12 +205,13 @@ export function slackMessage(notice: LabelNotice, label = NEEDS_HUMAN): string {
     `<!here> *<${notice.url}|#${notice.number} ${slackText(notice.title)}>*`,
     `\`${label}\` added by ${notice.labeledBy ? slackText(notice.labeledBy) : 'an unknown actor'}`,
   ]
-  if (!notice.comment) return [...lines, '_No comments on the issue yet._'].join('\n')
+  const howToResume = `Reply on the issue, then remove \`${label}\` to resume.`
+  if (!notice.comment) return [...lines, '_No comments on the issue yet._', howToResume].join('\n')
   const author = notice.comment.author ? slackText(notice.comment.author) : 'an unknown author'
   const quote = slackText(trimmed(notice.comment.body) || '(empty comment)')
     .split('\n')
     .map((line) => `> ${line}`)
-  return [...lines, `<${notice.comment.url}|Newest comment> by ${author}:`, ...quote].join('\n')
+  return [...lines, `<${notice.comment.url}|Newest comment> by ${author}:`, ...quote, howToResume].join('\n')
 }
 
 // Commands ---------------------------------------------------------------------------------------
@@ -223,6 +239,24 @@ export async function check(number: number, deps: Deps): Promise<'skipped' | 're
   if (issue.labels.includes('blocked')) await github.removeLabel(number, 'blocked')
   log(`#${number}: factory-ready, context from ${sections.length} ticket(s)`)
   return 'ready'
+}
+
+// A person answered on the issue and removed `needs-human`, so the ticket goes back to the factory: a fresh
+// Foreman run reads the answer from the issue comments. Only a person's removal counts, because the
+// factory removes the label itself after successful reviews. `factory-ready` comes off first, since `check`
+// skips a ticket that has it and Warp starts the Foreman when the label is added again.
+export async function resume(number: number, deps: Deps): Promise<'skipped' | 'ready' | 'blocked'> {
+  const { github, log = console.log } = deps
+  const issue = await github.issue(number)
+  const skip = resumeSkipReason(issue, await github.unlabeledBy(number, NEEDS_HUMAN))
+  if (skip) {
+    log(`#${number}: skipped resume, ${skip}`)
+    return 'skipped'
+  }
+  await github.comment(number, `Resuming: a person answered and removed ${NEEDS_HUMAN}.`)
+  if (issue.labels.includes('factory-ready')) await github.removeLabel(number, 'factory-ready')
+  // In-process, because a label added with GITHUB_TOKEN starts no workflow; Warp's GitHub app still sees it.
+  return check(number, deps)
 }
 
 export async function landed(number: number, deps: Deps): Promise<void> {
@@ -426,6 +460,15 @@ const NOTICE_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   }
 }`
 
+// `__typename` of the actor is `User` for a person and `Bot` for an app such as Warp's or github-actions.
+const UNLABELED_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      timelineItems(last: 50, itemTypes: [UNLABELED_EVENT]) { nodes { ... on UnlabeledEvent { actor { __typename login } label { name } } } }
+    }
+  }
+}`
+
 type RawRef = { number: number; title: string; state: 'OPEN' | 'CLOSED'; labels: { nodes: { name: string }[] } }
 const ref = (raw: RawRef): IssueRef => ({ number: raw.number, title: raw.title, state: raw.state, labels: raw.labels.nodes.map((l) => l.name) })
 
@@ -520,6 +563,21 @@ export function restGitHub(token: string, repository: string): GitHub {
         comment: comment ? { author: comment.author?.login ?? null, body: comment.body, url: comment.url } : null,
       }
     },
+    async unlabeledBy(number, label) {
+      const result = (await call('POST', '/graphql', { query: UNLABELED_QUERY, variables: { owner, name, number } })) as {
+        data?: {
+          repository: {
+            issue: { timelineItems: { nodes: { actor: { __typename: string; login: string } | null; label: { name: string } }[] } } | null
+          }
+        }
+        errors?: { message: string }[]
+      }
+      if (result.errors?.length) throw new Error(`GraphQL: ${result.errors.map((e) => e.message).join('; ')}`)
+      const raw = result.data?.repository.issue
+      if (!raw) throw new Error(`issue #${number} not found`)
+      const actor = raw.timelineItems.nodes.filter((e) => e.label?.name === label).at(-1)?.actor
+      return actor ? { login: actor.login, type: actor.__typename } : null
+    },
     async epicPull(epicNumber) {
       const head = encodeURIComponent(`${owner}:epic/${epicNumber}`)
       const raw = (await call('GET', `/repos/${owner}/${name}/pulls?state=open&base=main&head=${head}`)) as {
@@ -579,6 +637,7 @@ if (import.meta.main) {
     else if (command === 'unblock') await unblock(Number(arg), deps)
     else if (command === 'context-check') await contextCheck(Number(arg), deps)
     else if (command === 'notify') await notify(Number(arg), deps)
+    else if (command === 'resume') await resume(Number(arg), deps)
     else throw new Error(USAGE)
   } catch (err) {
     console.error(err instanceof Error ? err.message : err)

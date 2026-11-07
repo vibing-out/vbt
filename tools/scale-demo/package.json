@@ -9,12 +9,14 @@
     "./testing/db": "./src/testing/scratch-db.ts"
   },
   "scripts": {
-    "seed": "node src/cli.ts",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "seed": "pnpm --filter @vbt/crypto build && node src/cli.ts",
+    "typecheck": "pnpm --filter @vbt/crypto build && tsc --noEmit",
+    "test": "pnpm --filter @vbt/crypto build && vitest run"
   },
   "dependencies": {
+    "@vbt/crypto": "workspace:*",
     "@vbt/domain": "workspace:*",
+    "@vbt/events": "workspace:*",
     "pg": "8.23.1"
   },
   "devDependencies": {

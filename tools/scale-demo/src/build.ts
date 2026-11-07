@@ -1,9 +1,10 @@
 // Turns a plan into the rows the writer inserts. Every cryptographic value (keys, ciphertexts, tracking
-// codes, hashes, Merkle roots, totals, signatures) comes from the CryptoAdapter; nothing here hashes or
-// signs. With pendingCrypto this throws before a single row exists.
+// codes, hashes, Merkle roots, totals, signatures) comes from the CryptoAdapter, and the Merkle leaf
+// layout from @vbt/events; nothing here hashes or signs.
 
 import { randomUUID } from "node:crypto";
-import { mismatchEventPlan, validateBatchTransition } from "@vbt/domain";
+import { type BallotStatus, mismatchEventPlan, validateBatchTransition } from "@vbt/domain";
+import { stageLeaves } from "@vbt/events";
 import type { CryptoAdapter, StageRecord } from "./crypto-adapter.ts";
 import { BALLOT_STYLE, CAST_DATE, MANIFEST, MODEL, type Plan, VENDOR } from "./plan.ts";
 
@@ -68,8 +69,8 @@ export interface EventRow {
   precinct_id: string;
   county_id: string;
   event_type: "CAST" | "STATUS_CHANGE" | "MISMATCH_DETECTED";
-  from_status: string | null;
-  to_status: string | null;
+  from_status: BallotStatus | null;
+  to_status: BallotStatus | null;
   actor_role: string;
   actor_id: string;
   batch_id: string | null;
@@ -112,23 +113,21 @@ function checkHash(value: string, what: string): string {
   return value;
 }
 
-type Step = { eventType: EventRow["event_type"]; from: string | null; to: string | null; reason: string | null; actorId: string; batchId: string | null; occurredAt: string };
+type Step = { eventType: EventRow["event_type"]; from: BallotStatus | null; to: BallotStatus | null; reason: string | null; actorId: string; batchId: string | null; occurredAt: string };
 
-/** One ballot's events, each chaining the previous one's hash (hash input: public fields, date only). */
+/** One ballot's events, each chaining the previous one's hash (@vbt/events' locked chain fields, date only). */
 function chainEvents(crypto: CryptoAdapter, ballot: BallotRow, countyId: string, steps: readonly Step[]): EventRow[] {
   let prevHash: string | null = null;
   return steps.map((step) => {
     const hash = checkHash(
       crypto.eventHash({
-        prevHash,
-        ballotId: ballot.id,
-        precinctId: ballot.precinct_id,
-        countyId,
-        eventType: step.eventType,
-        fromStatus: step.from,
-        toStatus: step.to,
+        tracking_code: ballot.tracking_code,
+        event_type: step.eventType,
+        from_status: step.from,
+        to_status: step.to,
         reason: step.reason,
-        occurredOn: CAST_DATE,
+        occurred_on: CAST_DATE,
+        prev_hash: prevHash,
       }),
       "event hash",
     );
@@ -225,13 +224,9 @@ export async function buildRows(plan: Plan, crypto: CryptoAdapter, keys: SeedKey
       statuses.push({ id: b.row.id, current_status: b.mismatch ? "CHALLENGED" : "TALLIED_PRECINCT", mismatch: b.mismatch });
     }
 
-    // Leaves: the 32-byte ciphertext hashes, sorted by hex, so anyone can rebuild the root from the
-    // published (hash-ordered) record.
-    const leaves = tallied
-      .map((b) => b.row.ciphertext_hash)
-      .sort()
-      .map((h) => new Uint8Array(Buffer.from(h, "hex")));
-    const { root } = crypto.buildMerkleTree(leaves);
+    // Leaves: @vbt/events' locked stage leaves (tracking code, 0x00, ciphertext hash), ordered by
+    // ciphertext hash, the layout the tracker and verifier rebuild inclusion proofs from.
+    const { root } = crypto.buildMerkleTree(stageLeaves(tallied.map((b) => b.row)));
     const totals = await crypto.aggregateDecrypt(
       tallied.map((b) => b.ciphertext),
       keys.electionSecretKey,

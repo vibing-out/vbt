@@ -1,7 +1,6 @@
 import pg from "pg";
 import { afterEach, expect, test, vi } from "vitest";
 import { main, parseOptions, RUN_BUDGET_MS } from "./cli.ts";
-import { E3_PENDING } from "./crypto-adapter.ts";
 import { FAKE_KEY_ENV, fakeCrypto } from "./testing/fake-crypto.ts";
 import type { SeedConnection } from "./write.ts";
 
@@ -24,12 +23,12 @@ const clock = (stepMs: number) => {
 const SMALL = ["--ballots", "200", "--precincts", "4", "--rate", "0.05"];
 const LOCAL_ENV = { ...FAKE_KEY_ENV, PRODUCT_DATABASE_URL: "postgresql://postgres@localhost:5432/scratch" };
 
-test("AC5: with default dependencies the CLI exits non-zero with E3_PENDING and never connects", async () => {
+test("AC5: with default dependencies and keys that cannot encrypt, the CLI exits non-zero and never connects", async () => {
   const connect = vi.spyOn(pg.Client.prototype, "connect");
   const c = capture();
   const code = await main(["--yes"], { env: { ...FAKE_KEY_ENV, PRODUCT_DATABASE_URL: "postgresql://postgres@db.example.com/postgres" }, ...c.deps });
   expect(code).toBe(1);
-  expect(c.err.join("\n")).toContain(E3_PENDING);
+  expect(c.err.join("\n")).toMatch(/^scale-demo: /);
   expect(connect).not.toHaveBeenCalled();
 });
 

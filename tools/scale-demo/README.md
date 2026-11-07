@@ -5,7 +5,7 @@ precinct, and a mismatch report at `GET /api/reports/mismatches`.
 
 ```sh
 pnpm --filter @vbt/scale-demo seed                 # dry run: the plan's counts only, no crypto, no database
-pnpm --filter @vbt/scale-demo seed --yes           # build and write (after E3; see below)
+pnpm --filter @vbt/scale-demo seed --yes           # build and write
 #   --ballots 10000 --precincts 20 --rate 0.005 --seed vbt-scale-demo   (the defaults)
 ```
 
@@ -25,22 +25,18 @@ The writer refuses a database that already has `SCALE-DEMO`: events and stage re
 run can't be undone. It refuses to run under `CI`, and exits 1 if the run takes longer than 120 s.
 Output is counts per precinct and the elapsed time only.
 
-## Crypto: pending E3
+## Crypto
 
-Every cryptographic call goes through `CryptoAdapter` (`src/crypto-adapter.ts`), whose first eight methods
-mirror epic/4's `@vbt/crypto` signatures. Until E3 merges, the default adapter `pendingCrypto` throws
-`crypto lands with E3` from every method, so `seed --yes` fails before any connection opens and no
-placeholder ciphertext or tracking code is ever written. Tests use a fake adapter, and `runSeed` accepts a
-non-default adapter only with a localhost database.
-
-The follow-up after E3 replaces `DEFAULT_CRYPTO` with `@vbt/crypto`'s `generateSigningKeyPair`,
-`encryptBallot`, `computeTrackingCode`, `isTrackingCode`, `buildMerkleTree`, `aggregateDecrypt`,
-`signStageRecord` and `verifyStageRecord`. `ciphertextHash` and `eventHash` have no epic/4 export yet; a
-human decides which package supplies them.
+Every cryptographic call goes through `CryptoAdapter` (`src/crypto-adapter.ts`). The CLI's adapter,
+`realCrypto`, is `@vbt/crypto` (keys, sealed ballots, tracking codes, Merkle tree, aggregate decryption,
+stage-record signatures) plus `@vbt/events` (`sha256Hex` for ciphertext hashes, `hashEvent` for the event
+chain). Merkle leaves are `@vbt/events`' `stageLeaves`. So seeded ballots verify exactly like uploaded ones.
+Tests use a fake adapter with readable ciphertexts, and `runSeed` accepts a non-default adapter only with a
+localhost database.
 
 ## Human steps (agents can't do these)
 
-1. After E3 merges and the adapter follow-up lands: set `PRODUCT_DATABASE_URL` in Vercel (server only).
+1. Set `PRODUCT_DATABASE_URL` in Vercel (server only), or run the seed from the `seed-demo.yml` workflow on `main`.
 2. With the four key variables and `PRODUCT_DATABASE_URL` in `.env.local`, run `seed --yes` once against the
    product project. The demo county can never be removed afterwards.
 3. Then (the script checks the precinct exists) grant an official on the demo county, or use the state

@@ -1,10 +1,12 @@
 # The factory's deterministic routing: each job runs one subcommand of scripts/factory/dispatch.ts.
 #   check          a ticket gets `queued`: post earlier context, then label factory-ready (Warp's trigger) or blocked
-#   landed         a pull request merges into epic/*: log its context-log block, close the ticket, re-check what it blocked;
+#   landed         a pull request merges into epic/*: log its context-log block, close the ticket, re-check what it blocked,
+#                  and once the epic's last ticket closes, update the epic pull request from main and mark it ready;
 #                  into main: log its context-log block only (setup work and epic roll-ups)
 #   unblock        an issue closes: re-check the blocked issues it held back (for an epic, those waiting on any of its tickets)
 #   context-check  a pull request into epic/* or main opens or changes: its body needs one valid context-log block
-#                  (a required check), and an epic/* one also needs one `Ticket: #n` line
+#                  (a required check), and an epic/* one also needs one `Ticket: #n` line; `landed` also dispatches it
+#                  (workflow_dispatch, input `pr`) after updating an epic branch, since that push starts no workflow
 #   notify         an issue gets `needs-human` (from a person or Warp's GitHub app): post it to the team Slack channel.
 #                  `landed` adds `needs-human` with GITHUB_TOKEN, which starts no workflow, so it posts in-process.
 #
@@ -24,6 +26,14 @@ on:
   pull_request:
     types: [opened, edited, synchronize, closed]
     branches: ['epic/**', 'main']
+  # Runs only `context-check`, for the pull request whose head is the dispatched branch. dispatch.ts landed
+  # starts it on epic/<n> after updating that branch with GITHUB_TOKEN, a push that starts no workflow.
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number to check
+        required: true
+        type: number
 
 permissions:
   issues: write
@@ -31,7 +41,7 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  dispatch-check:
     if: github.event_name == 'issues' && github.event.label.name == 'queued'
     # Per job, not per workflow: a workflow-level group would let an unrelated label event cancel a pending check.
     concurrency:
@@ -58,6 +68,14 @@ jobs:
     if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged
     concurrency:
       group: factory-landed-${{ github.event.pull_request.number }}
+    # Writes beyond the workflow default, for the epic pull request once its last ticket lands:
+    # contents to merge main into epic/<n> (update-branch), pull-requests to mark it ready for review,
+    # actions to dispatch ci.yml and factory.yml on the updated branch so its required checks run.
+    permissions:
+      issues: write
+      contents: write
+      pull-requests: write
+      actions: write
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -102,7 +120,7 @@ jobs:
         run: node scripts/factory/dispatch.ts unblock "$ISSUE"
 
   context-check:
-    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    if: (github.event_name == 'pull_request' && github.event.action != 'closed') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -114,7 +132,7 @@ jobs:
           node-version-file: .nvmrc
       - env:
           GITHUB_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
+          PR: ${{ github.event_name == 'workflow_dispatch' && inputs.pr || github.event.pull_request.number }}
         run: node scripts/factory/dispatch.ts context-check "$PR"
 
   notify:

@@ -1,8 +1,14 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
-  branchName, build, decisions, hasSlot, parseClaude, prBody, verdict, withContract,
+  branchName, build, decisions, hasSlot, parseClaude, prBody, reviewVerdict, STAGES, verdict, withContract, withoutVerdict,
   type BuildDeps, type Exec, type Stage,
 } from './build.ts'
+import { check as checkReport } from './report.ts'
+
+const EXAMPLE = readFileSync(new URL('./report.example.md', import.meta.url), 'utf8')
+// The example report with its first fixed finding reopened: an open unambiguous fix.
+const OPEN_FIX = EXAMPLE.replace('[high, fixed]', '[high, open]')
 import type { GitHub, Issue, IssueRef } from './dispatch.ts'
 
 const claudeJson = (result: string, models = ['claude-opus-5-5']): string =>
@@ -80,6 +86,35 @@ describe('prBody', () => {
   })
 })
 
+describe('prompts', () => {
+  it('has a prompt file for every stage', () => {
+    for (const stage of STAGES) expect(readFileSync(new URL(`./prompts/${stage}.md`, import.meta.url), 'utf8').length).toBeGreaterThan(200)
+  })
+  it('leaves the verdict to the router', () => {
+    expect(readFileSync(new URL('./prompts/review.md', import.meta.url), 'utf8')).not.toMatch(/verdict/i)
+  })
+})
+
+describe('reviewVerdict', () => {
+  it('lets the checked report overrule a VERDICT line that says clean', () => {
+    const report = checkReport(OPEN_FIX, 'review')
+    expect(report.errors).toEqual([])
+    expect(reviewVerdict(`${OPEN_FIX}\nVERDICT: clean`, { ok: true, verdict: report.verdict })).toBe('fixes')
+  })
+  it('treats open judgment calls as clean, for the epic approver', () => {
+    expect(reviewVerdict('VERDICT: clean', { ok: true, verdict: 'approver decisions' })).toBe('clean')
+  })
+  it('always stops on an explicit needs-human', () => {
+    expect(reviewVerdict('VERDICT: needs-human', { ok: true, verdict: 'clean' })).toBe('needs-human')
+  })
+  it('falls back to the VERDICT line when the report failed its check', () => {
+    expect(reviewVerdict('VERDICT: fixes', { ok: false, verdict: 'clean' })).toBe('fixes')
+  })
+  it('strips the VERDICT line before the report is checked', () => {
+    expect(withoutVerdict(`${EXAMPLE}\n**VERDICT:** clean`)).toBe(EXAMPLE.trim())
+  })
+})
+
 describe('hasSlot', () => {
   it('lets the oldest two runs work', () => {
     expect(hasSlot([30, 10, 20], 20)).toBe(true)
@@ -108,6 +143,7 @@ function world(
     const line = `${command} ${args.join(' ')}`
     calls.push(line)
     const done = (stdout = '') => ({ code: 0, stdout, stderr: '' })
+    if (command === 'claude' && args.includes('--continue')) return done(claudeJson('still not a report'))
     if (command === 'claude') {
       const stage = (['triage', 'spec', 'implement', 'review', 'sync'] as Stage[]).find((s) => options?.input?.includes(`STAGE:${s}`))!
       return done(claudeJson(queue[stage]!.shift()!))
@@ -139,6 +175,7 @@ function world(
     github,
     exec,
     prompt: async (stage) => `STAGE:${stage}`,
+    writeFile: async (path) => void calls.push(`write ${path}`),
     notify: async () => void calls.push('notify'),
     landed: async (pr) => void calls.push(`landed ${pr}`),
     runUrl: 'https://github.com/vibing-out/vbt/actions/runs/7',
@@ -159,6 +196,14 @@ describe('build', () => {
     expect(w.calls.some((c) => c.startsWith('gh pr create'))).toBe(false)
   })
 
+  it('skips a ticket without factory-ready unless it is a shadow run', async () => {
+    const plain = { ...ticket, labels: [] }
+    const w = world({ triage: ['blocked\nVERDICT: needs-human'] })
+    w.deps.github.issue = async () => plain
+    expect(await build(32, w.deps)).toBe('skipped')
+    expect(await build(32, { ...w.deps, shadow: true })).toBe('needs-human')
+  })
+
   it('skips a ticket that already has an open pull request', async () => {
     const w = world({}, { inFlight: '34' })
     expect(await build(32, w.deps)).toBe('skipped')
@@ -170,15 +215,30 @@ describe('build', () => {
       triage: ['ready\nVERDICT: clean'],
       spec: ['Plan\n{"text": "Use libsodium"}\nVERDICT: clean'],
       implement: ['round 1\nVERDICT: clean', 'round 2\nVERDICT: clean'],
-      review: ['Missing test.\nVERDICT: fixes', 'No findings.\nVERDICT: clean'],
+      review: [`${OPEN_FIX}\nVERDICT: clean`, `${EXAMPLE}\nVERDICT: clean`],
     })
     expect(await build(32, w.deps)).toBe('merged')
     const order = w.calls.filter((c) => /^(gh pr (create|ready|merge)|dispatch )/.test(c) || c.includes('Review round'))
     expect(order[0]).toMatch(/^gh pr create --draft --base epic\/4 --head task\/T-21-crypto-package/)
     expect(w.calls.filter((c) => c.startsWith('claude') && c.includes('Read,Edit,Write')).length).toBe(2)
-    expect(order.slice(1)).toEqual(['gh pr ready 34', 'dispatch ci.yml', 'dispatch factory.yml', 'gh pr merge 34 --squash'])
+    expect(order.slice(1)).toEqual([
+      'dispatch ci.yml', 'dispatch factory.yml', 'dispatch ci.yml', 'dispatch factory.yml', 'gh pr ready 34', 'gh pr merge 34 --squash',
+    ])
     expect(w.calls).toContain('landed 34')
     expect(w.labels).toEqual([])
+    // Checks run before each review, so the review reports real CI results; the report is posted rendered.
+    expect(w.calls.filter((c) => c.startsWith('dispatch ci.yml')).length).toBe(2)
+    expect(w.calls.some((c) => c.includes('--continue'))).toBe(false)
+    expect(w.calls).toContain('write /tmp/ticket-context.md')
+  })
+
+  it('repairs a malformed review report once, then routes on the VERDICT line', async () => {
+    const w = world({
+      triage: ['VERDICT: clean'], spec: ['VERDICT: clean'], implement: ['done\nVERDICT: clean'],
+      review: ['not a report\nVERDICT: clean'],
+    })
+    expect(await build(32, w.deps)).toBe('merged')
+    expect(w.calls.filter((c) => c.includes('--continue')).length).toBe(1)
   })
 
   it('stops for a person when checks still fail after two implement attempts', async () => {

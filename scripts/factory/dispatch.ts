@@ -1,7 +1,8 @@
 // The factory's deterministic routing, with no dependencies and no model. GitHub Actions runs one
 // subcommand per event (see .github/workflows/factory.yml):
 //   node scripts/factory/dispatch.ts check <issue>         on `queued`: label factory-ready or blocked
-//   node scripts/factory/dispatch.ts landed <pr>           on a merge into epic/*: log, close, unblock; into main: log
+//   node scripts/factory/dispatch.ts landed <pr>           on a merge into epic/*: log, close, unblock, and mark the
+//                                                          epic pull request ready once its last ticket closes; into main: log
 //   node scripts/factory/dispatch.ts unblock <issue>       on an issue closing: re-check what it blocked
 //   node scripts/factory/dispatch.ts context-check <pr>    on epic/* and main pull requests: validate the body
 //   node scripts/factory/dispatch.ts notify <issue>        on `needs-human`: post the issue to the team Slack channel
@@ -30,6 +31,8 @@ export type Issue = IssueRef & {
   blocking: IssueRef[]
 }
 export type Pull = { number: number; url: string; merged: boolean; base: string; body: string; mergeCommit: string | null }
+// The open pull request from `epic/<n>` into `main`. `nodeId` is what GraphQL mutations take.
+export type EpicPull = { number: number; url: string; draft: boolean; nodeId: string; head: string }
 // What the Slack post needs about an issue that was labeled: who added the label (null when GitHub
 // has no actor, such as a deleted account) and the newest comment, which usually holds the questions.
 export type LabelNotice = {
@@ -48,6 +51,11 @@ export interface GitHub {
   removeLabel(number: number, label: string): Promise<void>
   close(number: number): Promise<void>
   labelNotice(number: number, label: string): Promise<LabelNotice>
+  // The open pull request whose head is `epic/<n>` and whose base is `main`, or null when none is open.
+  epicPull(epicNumber: number): Promise<EpicPull | null>
+  // Merges `main` into the pull request's branch when it is behind; false when it was already current.
+  updateBranch(pull: EpicPull): Promise<boolean>
+  markReady(pull: EpicPull): Promise<void>
 }
 
 // Runs scripts/context.ts with these arguments and this standard input; resolves to its stdout.
@@ -162,6 +170,16 @@ export function trimmed(text: string, limit = SLACK_QUOTE_LIMIT): string {
   return chars.length <= limit ? chars.join('') : `${chars.slice(0, limit).join('').trimEnd()}…`
 }
 
+// The epic id at the start of an epic issue title ("E1 Foundation" -> "E1").
+export function epicId(title: string): string | null {
+  return /^(E\d+)\b/.exec(title.trim())?.[1] ?? null
+}
+
+// The Slack post for an epic pull request that is ready for a person to approve into main.
+export function epicReadyMessage(pull: EpicPull, epicTitle: string): string {
+  return `<!here> *<${pull.url}|${slackText(epicTitle)}>* is ready for approval into main`
+}
+
 // A bold title link, who added the label, then the newest comment as a quote block.
 export function slackMessage(notice: LabelNotice, label = NEEDS_HUMAN): string {
   const lines = [
@@ -235,8 +253,54 @@ export async function landed(number: number, deps: Deps): Promise<void> {
   }
   await github.close(ticket)
   log(`#${ticket}: closed by pull request #${number}`)
-  // In-process, because closing with GITHUB_TOKEN does not start the `issues: closed` workflow.
-  await unblock(ticket, deps)
+  try {
+    // In-process, because closing with GITHUB_TOKEN does not start the `issues: closed` workflow.
+    await unblock(ticket, deps)
+  } finally {
+    // Runs even when a re-check fails, since this ticket's merge is done either way. Never throws.
+    const epic = /^epic\/(\d+)$/.exec(pr.base)?.[1]
+    if (epic) await epicReady(Number(epic), deps)
+    else log(`pull request #${number}: base ${pr.base} is not epic/<n>; skipped the epic readiness check`)
+  }
+}
+
+// Once every ticket in the epic is closed, brings the epic pull request up to date with `main` (whose
+// ruleset requires it), marks it ready for review, comments and posts to Slack. A pull request that is
+// already ready was handled by an earlier run, so nothing is repeated. Failures are logged, not thrown:
+// the ticket has already merged and closed, and a person can mark the pull request ready by hand.
+export async function epicReady(
+  epicNumber: number,
+  deps: Deps,
+): Promise<'waiting' | 'no-pull' | 'already-ready' | 'ready' | 'failed'> {
+  const { github, log = console.log } = deps
+  try {
+    const epic = await github.issue(epicNumber)
+    const open = epic.subIssues.filter((s) => s.state !== 'CLOSED')
+    if (open.length) {
+      log(`epic #${epicNumber}: waiting on ${open.map((s) => `#${s.number}`).join(', ')}`)
+      return 'waiting'
+    }
+    const pull = await github.epicPull(epicNumber)
+    if (!pull) {
+      log(`epic #${epicNumber}: every ticket is closed, but no open pull request from epic/${epicNumber} into main`)
+      return 'no-pull'
+    }
+    if (!pull.draft) {
+      log(`epic #${epicNumber}: pull request #${pull.number} is already ready for review`)
+      return 'already-ready'
+    }
+    const updated = await github.updateBranch(pull)
+    await github.markReady(pull)
+    const name = epicId(epic.title) ?? `#${epicNumber}`
+    await github.comment(pull.number, `All tickets in ${name} have merged. Ready for human approval into main.`)
+    log(`epic #${epicNumber}: pull request #${pull.number} ${updated ? 'updated from main and ' : ''}marked ready for review`)
+    if ((await postSlack(deps, async () => epicReadyMessage(pull, epic.title))) === 'posted')
+      log(`epic #${epicNumber}: posted to Slack`)
+    return 'ready'
+  } catch (err) {
+    log(`epic #${epicNumber}: readiness step failed: ${err instanceof Error ? err.message : err}`)
+    return 'failed'
+  }
 }
 
 // Pull requests straight into main (setup work, epic roll-ups) are logged too, so their decisions and
@@ -300,24 +364,31 @@ export function webhookUrl(secret: string | undefined): string | null {
   return /https:\/\/hooks\.slack\.com\/services\/[A-Za-z0-9/_-]+/.exec(secret ?? '')?.[0] ?? null
 }
 
-// Posts a labeled issue to the team Slack channel. Skips, without failing, when no webhook is set.
-// The webhook URL is a secret, so it never appears in a log line or an error message.
-export async function notify(number: number, deps: Deps): Promise<'skipped' | 'posted'> {
-  const { github, fetch: post = fetch, log = console.log } = deps
+// Posts to the team Slack channel. Skips, without failing, when no webhook is set; `text` is only
+// built once a webhook is known, so a skip reads nothing from GitHub. The webhook URL is a secret, so
+// it never appears in a log line or an error message.
+async function postSlack(deps: Deps, text: () => Promise<string>): Promise<'skipped' | 'posted'> {
+  const { fetch: post = fetch, log = console.log } = deps
   const slackWebhook = webhookUrl(deps.slackWebhook)
   if (!slackWebhook) {
     log(deps.slackWebhook ? 'SLACK_WEBHOOK_URL holds no hooks.slack.com URL; skipping' : 'Slack webhook not configured; skipping')
     return 'skipped'
   }
-  const text = slackMessage(await github.labelNotice(number, NEEDS_HUMAN))
   const response = await post(slackWebhook, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, unfurl_links: false, unfurl_media: false }),
+    body: JSON.stringify({ text: await text(), unfurl_links: false, unfurl_media: false }),
   })
   if (!response.ok) throw new Error(`Slack webhook returned ${response.status}: ${(await response.text()).slice(0, 200)}`)
-  log(`#${number}: posted to Slack`)
   return 'posted'
+}
+
+// Posts a labeled issue to the team Slack channel.
+export async function notify(number: number, deps: Deps): Promise<'skipped' | 'posted'> {
+  const { github, log = console.log } = deps
+  const result = await postSlack(deps, async () => slackMessage(await github.labelNotice(number, NEEDS_HUMAN)))
+  if (result === 'posted') log(`#${number}: posted to Slack`)
+  return result
 }
 
 // GitHub over fetch ------------------------------------------------------------------------------
@@ -439,6 +510,28 @@ export function restGitHub(token: string, repository: string): GitHub {
         labeledBy: event?.actor?.login ?? null,
         comment: comment ? { author: comment.author?.login ?? null, body: comment.body, url: comment.url } : null,
       }
+    },
+    async epicPull(epicNumber) {
+      const head = encodeURIComponent(`${owner}:epic/${epicNumber}`)
+      const raw = (await call('GET', `/repos/${owner}/${name}/pulls?state=open&base=main&head=${head}`)) as {
+        number: number; html_url: string; draft: boolean; node_id: string; head: { ref: string }
+      }[]
+      const found = raw[0]
+      return found ? { number: found.number, url: found.html_url, draft: found.draft, nodeId: found.node_id, head: found.head.ref } : null
+    },
+    async updateBranch(pull) {
+      // How many commits `main` has that the epic branch lacks; the update call is only needed when any.
+      const compare = (await call('GET', `/repos/${owner}/${name}/compare/${pull.head}...main`)) as { ahead_by: number }
+      if (compare.ahead_by === 0) return false
+      await call('PUT', `/repos/${owner}/${name}/pulls/${pull.number}/update-branch`, {})
+      return true
+    },
+    async markReady(pull) {
+      const result = (await call('POST', '/graphql', {
+        query: 'mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { isDraft } } }',
+        variables: { id: pull.nodeId },
+      })) as { errors?: { message: string }[] }
+      if (result.errors?.length) throw new Error(`GraphQL: ${result.errors.map((e) => e.message).join('; ')}`)
     },
   }
 }

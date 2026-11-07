@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  check, contextComment, landed, notify, readiness, slackMessage, slackText, ticketNumber, trimmed, unblock, webhookUrl,
-  type Blocker, type GitHub, type Issue, type IssueRef, type LabelNotice, type Pull,
+  check, contextComment, epicReady, epicReadyMessage, landed, notify, readiness, slackMessage, slackText, ticketNumber, trimmed, unblock, webhookUrl,
+  type Blocker, type EpicPull, type GitHub, type Issue, type IssueRef, type LabelNotice, type Pull,
 } from './dispatch.ts'
 
 const ref = (number: number, title: string, state: IssueRef['state'] = 'OPEN', labels: string[] = []): IssueRef => ({ number, title, state, labels })
@@ -21,7 +21,7 @@ const ticket = (overrides: Partial<Issue> = {}): Issue => ({
 })
 
 // A fake GitHub that records every write in order, so tests can assert on sequencing.
-function fakeGitHub(issues: Issue[], pull?: Pull, notice?: LabelNotice): GitHub & { calls: string[] } {
+function fakeGitHub(issues: Issue[], pull?: Pull, notice?: LabelNotice, epicPull: EpicPull | null = null): GitHub & { calls: string[] } {
   const calls: string[] = []
   const byNumber = new Map(issues.map((i) => [i.number, i]))
   return {
@@ -48,12 +48,24 @@ function fakeGitHub(issues: Issue[], pull?: Pull, notice?: LabelNotice): GitHub 
       calls.push(`close #${n}`)
       const found = byNumber.get(n)
       if (found) found.state = 'CLOSED'
-      for (const i of byNumber.values()) for (const b of i.blockedBy) if (b.number === n) b.state = 'CLOSED'
+      for (const i of byNumber.values()) for (const r of [...i.blockedBy, ...i.subIssues]) if (r.number === n) r.state = 'CLOSED'
     },
     async labelNotice(n, label) {
       calls.push(`read notice #${n} ${label}`)
       if (!notice) throw new Error('no notice')
       return notice
+    },
+    async epicPull(n) {
+      calls.push(`find epic pull for #${n}`)
+      return epicPull
+    },
+    async updateBranch(p) {
+      calls.push(`update #${p.number}`)
+      return true
+    },
+    async markReady(p) {
+      calls.push(`ready #${p.number}`)
+      if (epicPull) epicPull.draft = false
     },
   }
 }
@@ -402,5 +414,96 @@ describe('webhookUrl', () => {
   it('returns null when no Slack webhook URL is present', () => {
     expect(webhookUrl('not a url')).toBeNull()
     expect(webhookUrl(undefined)).toBeNull()
+  })
+})
+
+describe('epicReady from landed', () => {
+  // E1 (#2) holds T-02 (#11) and T-04 (#12); pull request #40 merges T-02 into epic/2. Built fresh per
+  // test, since the fake's close mutates the sub-issue states.
+  const webhook = 'https://hooks.slack.com/services/T000/B000/secret'
+  const pull: Pull = {
+    number: 40,
+    url: 'https://github.com/vibing-out/vbt/pull/40',
+    merged: true,
+    base: 'epic/2',
+    body: 'Ticket: #11',
+    mergeCommit: 'a'.repeat(40),
+  }
+  const epicPull = (draft = true): EpicPull => ({ number: 39, url: 'https://github.com/vibing-out/vbt/pull/39', draft, nodeId: 'PR_39', head: 'epic/2' })
+  // `landedState` is T-02's state as the epic reports it: open when `landed` will close it, closed when
+  // a test calls epicReady directly.
+  const setup = (siblingState: IssueRef['state'], epicPr: EpicPull | null, landedState: IssueRef['state'] = 'OPEN') => {
+    const e1Ref = ref(2, 'E1 Foundation', 'OPEN', ['epic'])
+    const e1: Issue = { ...e1Ref, parent: null, subIssues: [ref(11, 'T-02 Domain', landedState), ref(12, 'T-04 Schema', siblingState)], blockedBy: [], blocking: [] }
+    const t02: Issue = { ...ref(11, 'T-02 Domain', 'OPEN', ['factory-ready']), parent: { ...e1Ref, subIssues: [] }, subIssues: [], blockedBy: [], blocking: [] }
+    const github = fakeGitHub([e1, t02], pull, undefined, epicPr)
+    const post = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response('ok', { status: 200 }))
+    const lines: string[] = []
+    const deps = { github, context: async () => 'ok', fetch: post, log: (l: string) => lines.push(l) }
+    return { github, post, lines, deps }
+  }
+
+  it('updates the branch, marks it ready, comments and posts to Slack once the last ticket closes', async () => {
+    const { github, post, deps } = setup('CLOSED', epicPull())
+    await landed(40, { ...deps, slackWebhook: webhook })
+    expect(github.calls).toEqual([
+      'close #11',
+      'find epic pull for #2',
+      'update #39',
+      'ready #39',
+      'comment #39 All tickets in E1 have merged. Ready for human approval into main.',
+    ])
+    expect(post).toHaveBeenCalledOnce()
+    const [url, init] = post.mock.calls[0] ?? []
+    expect(url).toBe(webhook)
+    expect(JSON.parse(String(init?.body)).text).toBe('<!here> *<https://github.com/vibing-out/vbt/pull/39|E1 Foundation>* is ready for approval into main')
+  })
+  it('does nothing while a sibling ticket is still open', async () => {
+    const { github, post, lines, deps } = setup('OPEN', epicPull())
+    await landed(40, { ...deps, slackWebhook: webhook })
+    expect(github.calls).toEqual(['close #11'])
+    expect(post).not.toHaveBeenCalled()
+    expect(lines).toContain('epic #2: waiting on #12')
+  })
+  it('does not comment or post again when the epic pull request is already ready', async () => {
+    const { github, post, deps } = setup('CLOSED', epicPull(false), 'CLOSED')
+    expect(await epicReady(2, { ...deps, slackWebhook: webhook })).toBe('already-ready')
+    expect(github.calls).toEqual(['find epic pull for #2'])
+    expect(post).not.toHaveBeenCalled()
+  })
+  it('a second run after a successful one repeats nothing', async () => {
+    const { github, post, deps } = setup('CLOSED', epicPull(), 'CLOSED')
+    expect(await epicReady(2, { ...deps, slackWebhook: webhook })).toBe('ready')
+    expect(await epicReady(2, { ...deps, slackWebhook: webhook })).toBe('already-ready')
+    expect(github.calls.filter((c) => c.startsWith('comment'))).toHaveLength(1)
+    expect(post).toHaveBeenCalledOnce()
+  })
+  it('logs and returns when no epic pull request is open', async () => {
+    const { github, lines, deps } = setup('CLOSED', null)
+    await landed(40, deps)
+    expect(github.calls).toEqual(['close #11', 'find epic pull for #2'])
+    expect(lines).toContain('epic #2: every ticket is closed, but no open pull request from epic/2 into main')
+  })
+  it('still marks it ready and comments, but posts nothing, without a webhook', async () => {
+    for (const slackWebhook of [undefined, '']) {
+      const { github, post, lines, deps } = setup('CLOSED', epicPull(), 'CLOSED')
+      expect(await epicReady(2, { ...deps, slackWebhook })).toBe('ready')
+      expect(github.calls).toContain('ready #39')
+      expect(github.calls).toContain('comment #39 All tickets in E1 have merged. Ready for human approval into main.')
+      expect(post).not.toHaveBeenCalled()
+      expect(lines).toContain('Slack webhook not configured; skipping')
+    }
+  })
+  it('logs a failure without failing landed, since the ticket has already merged', async () => {
+    const { github, lines, deps } = setup('CLOSED', epicPull())
+    github.updateBranch = async () => {
+      throw new Error('422 from PUT update-branch: merge conflict')
+    }
+    await expect(landed(40, deps)).resolves.toBeUndefined()
+    expect(github.calls).toEqual(['close #11', 'find epic pull for #2'])
+    expect(lines).toContain('epic #2: readiness step failed: 422 from PUT update-branch: merge conflict')
+  })
+  it('escapes the epic title in the Slack message', () => {
+    expect(epicReadyMessage(epicPull(), 'E1 <@here> & co')).toBe('<!here> *<https://github.com/vibing-out/vbt/pull/39|E1 &lt;&gt; &amp; co>* is ready for approval into main')
   })
 })

@@ -190,6 +190,14 @@ describe('build', () => {
     expect(w.calls.some((c) => c.startsWith('gh pr create'))).toBe(false)
   })
 
+  it('skips a ticket without factory-ready unless it is a shadow run', async () => {
+    const plain = { ...ticket, labels: [] }
+    const w = world({ triage: ['blocked\nVERDICT: needs-human'] })
+    w.deps.github.issue = async () => plain
+    expect(await build(32, w.deps)).toBe('skipped')
+    expect(await build(32, { ...w.deps, shadow: true })).toBe('needs-human')
+  })
+
   it('skips a ticket that already has an open pull request', async () => {
     const w = world({}, { inFlight: '34' })
     expect(await build(32, w.deps)).toBe('skipped')

@@ -2,7 +2,9 @@
 // Actions job (.github/workflows/build.yml), with Claude Code on the team's subscription token doing all the
 // thinking. This script decides nothing itself: it runs each stage's `claude -p` call in order, posts what
 // Claude wrote, and routes on the VERDICT line every stage must end with.
-//   node scripts/factory/build.ts <issue>
+//   node scripts/factory/build.ts <issue> [--shadow]
+// --shadow works a ticket without `factory-ready` (a trial run on a ticket Warp isn't working); every other
+// addressing rule still applies.
 // Stages: triage -> spec -> implement -> review (up to MAX_REVIEW_ROUNDS, fixes go back to implement) ->
 // required checks -> squash merge -> dispatch.ts `landed` in-process. The prompts are
 // scripts/factory/prompts/<stage>.md; each gets the ticket and earlier stages' output appended as data.
@@ -200,6 +202,8 @@ export type BuildDeps = {
   runId: number
   sleep: (ms: number) => Promise<void>
   log?: (line: string) => void
+  // Work the ticket without requiring `factory-ready` (see --shadow in the header).
+  shadow?: boolean
 }
 
 class Stop extends Error {}
@@ -255,8 +259,8 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
 
     // 1. Addressing: same rules as the Warp Foreman.
     const issue: Issue = await github.issue(number)
-    if (issue.state !== 'OPEN' || !issue.labels.includes('factory-ready') || issue.labels.includes('local')) {
-      log(`#${number}: skipped, not an open factory-ready ticket outside local`)
+    if (issue.state !== 'OPEN' || !(deps.shadow || issue.labels.includes('factory-ready')) || issue.labels.includes('local')) {
+      log(`#${number}: skipped, not an open ${deps.shadow ? '' : 'factory-ready '}ticket outside local`)
       return 'skipped'
     }
     const inFlight = await ok('gh', ['pr', 'list', '--state', 'open', '--search', `"Ticket: #${number}" in:body`, '--json', 'number', '--jq', '.[].number'])
@@ -424,8 +428,9 @@ export const run: Exec = (command, args, options = {}) =>
 
 if (import.meta.main) {
   const [arg, ...extra] = process.argv.slice(2)
+  const shadow = extra.length === 1 && extra[0] === '--shadow'
   try {
-    if (!arg || !/^\d+$/.test(arg) || extra.length) throw new Error('usage: node build.ts <issue>')
+    if (!arg || !/^\d+$/.test(arg) || (extra.length && !shadow)) throw new Error('usage: node build.ts <issue> [--shadow]')
     const token = process.env.GITHUB_TOKEN
     if (!token) throw new Error('GITHUB_TOKEN is not set')
     if (!process.env.CLAUDE_CODE_OAUTH_TOKEN) throw new Error('CLAUDE_CODE_OAUTH_TOKEN is not set')
@@ -442,6 +447,7 @@ if (import.meta.main) {
       runUrl: process.env.RUN_URL ?? '',
       runId: Number(process.env.GITHUB_RUN_ID ?? 0),
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      shadow,
     })
     console.log(`#${arg}: ${result}`)
   } catch (err) {

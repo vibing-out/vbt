@@ -7,6 +7,7 @@ import {
   CHALLENGEABLE_STATUSES,
   findRule,
   isTerminal,
+  PUBLISHED_STAGES,
   TRANSITIONS,
   transition,
   type TransitionInput,
@@ -223,5 +224,11 @@ describe("AC3: batch-transition validation", () => {
         });
       }
     }
+  });
+});
+
+describe("PUBLISHED_STAGES", () => {
+  test('is the locked "Batch" column\'s targets, in stage order', () => {
+    expect([...PUBLISHED_STAGES]).toEqual(["TALLIED_PRECINCT", "REPORTED_UNOFFICIAL", "CERTIFIED"]);
   });
 });

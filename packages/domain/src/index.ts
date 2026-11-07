@@ -12,6 +12,7 @@ export {
   type BatchTransitionInput,
   CHALLENGEABLE_STATUSES,
   findRule,
+  PUBLISHED_STAGES,
   TRANSITIONS,
   type TransitionErrorCode,
   type TransitionInput,
@@ -62,3 +63,14 @@ export {
   type Totals,
   totalsEqual,
 } from "./crosscheck.ts";
+
+export {
+  buildTrackTimeline,
+  FALLBACK_RANK,
+  orderByChain,
+  publicReason,
+  type PublicEvent,
+  sortStageRecords,
+  stageOrder,
+  type TrackTimelineEntry,
+} from "./timeline.ts";

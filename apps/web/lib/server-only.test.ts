@@ -15,6 +15,7 @@ const serverModules = [
   "lib/mismatches.ts",
   "lib/uploads.ts",
   "lib/page-guard.ts",
+  "lib/track/lookup.ts",
 ];
 
 function sourceFiles(dir: string): string[] {
@@ -36,7 +37,7 @@ test("only the server-only context-log module reads CONTEXT_* names, and no clie
     const rel = relative(root, file);
     if (/CONTEXT_(SUPABASE_URL|SUPABASE_PUBLISHABLE_KEY|EMAIL|PASSWORD)/.test(source)) expect(rel).toBe("lib/context-log.ts");
     if (/^\s*["']use client["']/m.test(source)) {
-      expect(source).not.toMatch(/product-db|context-log|require-role/);
+      expect(source).not.toMatch(/product-db|context-log|require-role|track\/lookup|track\/handler/);
       // T-09 server modules, by import path (a client form may still name its /api/batches URL).
       expect(source).not.toMatch(/from\s+["'][^"']*lib\/(service-db|crypto|batches|challenges|mismatches|uploads|page-guard)\b/);
     }

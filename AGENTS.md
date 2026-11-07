@@ -29,6 +29,7 @@ The context log is an insert-only table in the Supabase project `vbt-context-log
 - Anyone can create a ticket. Finish writing it (parent, blockers) before adding `queued`; the dispatch script adds `factory-ready`, never a person or agent.
 - Only the coordinator session runs the 9:00 ticket creation and, if dispatch breaks, sends tasks to the factory by hand. `docs/STATE.md` names the coordinator.
 - For a `local` ticket, follow the `factory-ticket` skill in `.claude/skills/`.
+- To answer a `needs-human` ticket, reply on the issue, then remove the label; the factory resumes.
 
 ## Branches and merges
 

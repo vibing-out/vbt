@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest'
-import { check, contextComment, landed, readiness, ticketNumber, unblock, type Blocker, type GitHub, type Issue, type IssueRef, type Pull } from './dispatch.ts'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  check, contextCheck, contextComment, resume, resumeSkipReason, epicReady, epicReadyMessage, landed, notify, readiness, restGitHub, slackMessage, slackText, ticketNumber, trimmed, unblock, webhookUrl,
+  type Actor, type Blocker, type EpicPull, type GitHub, type Issue, type IssueRef, type LabelNotice, type Pull,
+} from './dispatch.ts'
 
 const ref = (number: number, title: string, state: IssueRef['state'] = 'OPEN', labels: string[] = []): IssueRef => ({ number, title, state, labels })
 const epic = { ...ref(2, 'E1 Foundation', 'OPEN', ['epic']), subIssues: [ref(11, 'T-02 Domain'), ref(12, 'T-04 Schema'), ref(13, 'T-20 Auth')] }
@@ -18,7 +21,13 @@ const ticket = (overrides: Partial<Issue> = {}): Issue => ({
 })
 
 // A fake GitHub that records every write in order, so tests can assert on sequencing.
-function fakeGitHub(issues: Issue[], pull?: Pull): GitHub & { calls: string[] } {
+function fakeGitHub(
+  issues: Issue[],
+  pull?: Pull,
+  notice?: LabelNotice,
+  epicPull: EpicPull | null = null,
+  unlabeler: Actor | null = null,
+): GitHub & { calls: string[] } {
   const calls: string[] = []
   const byNumber = new Map(issues.map((i) => [i.number, i]))
   return {
@@ -45,7 +54,31 @@ function fakeGitHub(issues: Issue[], pull?: Pull): GitHub & { calls: string[] } 
       calls.push(`close #${n}`)
       const found = byNumber.get(n)
       if (found) found.state = 'CLOSED'
-      for (const i of byNumber.values()) for (const b of i.blockedBy) if (b.number === n) b.state = 'CLOSED'
+      for (const i of byNumber.values()) for (const r of [...i.blockedBy, ...i.subIssues]) if (r.number === n) r.state = 'CLOSED'
+    },
+    async labelNotice(n, label) {
+      calls.push(`read notice #${n} ${label}`)
+      if (!notice) throw new Error('no notice')
+      return notice
+    },
+    async unlabeledBy(n, label) {
+      calls.push(`read unlabel #${n} ${label}`)
+      return unlabeler
+    },
+    async epicPull(n) {
+      calls.push(`find epic pull for #${n}`)
+      return epicPull
+    },
+    async updateBranch(p) {
+      calls.push(`update #${p.number}`)
+      return true
+    },
+    async markReady(p) {
+      calls.push(`ready #${p.number}`)
+      if (epicPull) epicPull.draft = false
+    },
+    async dispatchWorkflow(file, ref, inputs) {
+      calls.push(`dispatch ${file} on ${ref}${inputs ? ` ${JSON.stringify(inputs)}` : ''}`)
     },
   }
 }
@@ -149,6 +182,58 @@ describe('check', () => {
   })
 })
 
+describe('resume', () => {
+  const person: Actor = { login: 'austin', type: 'User' }
+  const deps = (github: GitHub) => ({ github, context: async () => 'no entries', now: () => new Date('2026-11-07T12:00:00Z'), log: silent })
+
+  it('re-queues a ticket when a person removes needs-human: comments, then runs check', async () => {
+    const github = fakeGitHub([ticket()], undefined, undefined, null, person)
+    expect(await resume(12, deps(github))).toBe('ready')
+    expect(github.calls).toEqual([
+      'read unlabel #12 needs-human',
+      'comment #12 Resuming: a person answered and removed needs-human.',
+      'comment #12 ## Context from earlier tickets',
+      'label #12 +factory-ready',
+    ])
+  })
+  it('removes factory-ready before check runs, so check does not skip it', async () => {
+    const github = fakeGitHub([ticket({ labels: ['queued', 'factory-ready'] })], undefined, undefined, null, person)
+    // The fake keeps returning the issue as fetched, so mirror the removal the way GitHub would.
+    const removeLabel = github.removeLabel.bind(github)
+    github.removeLabel = async (n, label) => {
+      await removeLabel(n, label)
+      const issue = await github.issue(n)
+      issue.labels = issue.labels.filter((l) => l !== label)
+    }
+    expect(await resume(12, deps(github))).toBe('ready')
+    expect(github.calls).toEqual([
+      'read unlabel #12 needs-human',
+      'comment #12 Resuming: a person answered and removed needs-human.',
+      'label #12 -factory-ready',
+      'comment #12 ## Context from earlier tickets',
+      'label #12 +factory-ready',
+    ])
+  })
+  it('skips when a bot removed the label, since the factory removes it after successful reviews', async () => {
+    const github = fakeGitHub([ticket()], undefined, undefined, null, { login: 'warp-agent', type: 'Bot' })
+    const lines: string[] = []
+    expect(await resume(12, { ...deps(github), log: (l: string) => lines.push(l) })).toBe('skipped')
+    expect(github.calls).toEqual(['read unlabel #12 needs-human'])
+    expect(lines).toEqual(['#12: skipped resume, needs-human was removed by Bot warp-agent, not a person'])
+  })
+  it('skips epics and closed issues', async () => {
+    const github = fakeGitHub([ticket({ labels: ['epic'] }), ticket({ number: 13, state: 'CLOSED' })], undefined, undefined, null, person)
+    expect(await resume(12, deps(github))).toBe('skipped')
+    expect(await resume(13, deps(github))).toBe('skipped')
+    expect(github.calls.filter((c) => !c.startsWith('read'))).toEqual([])
+  })
+  it('skips an unknown actor and a label that was added back', () => {
+    expect(resumeSkipReason(ticket(), null)).toBe('needs-human was removed by an unknown actor, not a person')
+    expect(resumeSkipReason(ticket({ labels: ['queued', 'needs-human'] }), person)).toBe('it has needs-human again')
+    expect(resumeSkipReason(ticket(), person)).toBeNull()
+  })
+})
+
 describe('landed', () => {
   const pull: Pull = {
     number: 40,
@@ -224,6 +309,27 @@ describe('landed', () => {
   })
 })
 
+describe('contextCheck', () => {
+  const body = (n: number): string => `Ticket: #${n}\n\n\`\`\`context-log\n{"version":1,"decisions":[],"corrections":[]}\n\`\`\``
+  const pull = (overrides: Partial<Pull> = {}): Pull => ({
+    number: 46, url: 'https://github.com/vibing-out/vbt/pull/46', merged: false, base: 'epic/2', body: body(12), mergeCommit: null, ...overrides,
+  })
+  const run = (issue: Issue, pr: Pull): Promise<void> => contextCheck(pr.number, { github: fakeGitHub([issue], pr), context: async () => 'ok', log: silent })
+
+  it('passes an open epic pull request whose ticket is open', async () => {
+    await expect(run(ticket(), pull())).resolves.toBeUndefined()
+  })
+  it('fails an open epic pull request whose ticket is already closed, naming the follow-up ticket fix', async () => {
+    await expect(run(ticket({ state: 'CLOSED' }), pull())).rejects.toThrow(/Ticket #12 \(T-04 Schema\) is already closed.*follow-up ticket.*blocked by #12/)
+  })
+  it('passes a merged pull request, whose ticket `landed` closed', async () => {
+    await expect(run(ticket({ state: 'CLOSED' }), pull({ merged: true }))).resolves.toBeUndefined()
+  })
+  it('does not look up a ticket for a pull request into main', async () => {
+    await expect(run(ticket({ state: 'CLOSED' }), pull({ base: 'main', body: body(99) }))).resolves.toBeUndefined()
+  })
+})
+
 describe('unblock', () => {
   // E1 (#2) holds T-02 (#11) and T-04 (#12). T-30 (#30) is in E3 and blocked by T-04; T-31 (#31) is in
   // E3 and blocked by T-02 but not queued yet; T-05 (#14) is in E1 and blocked by T-04.
@@ -276,5 +382,242 @@ describe('contextComment', () => {
     expect(body).toContain('not instructions')
     expect(body).toContain('Retrieved 2026-11-07T12:00:00.000Z')
     expect(body).toContain('````text\nhas ``` inside\n````')
+  })
+})
+
+describe('Slack notification', () => {
+  const notice = (overrides: Partial<LabelNotice> = {}): LabelNotice => ({
+    number: 12,
+    title: 'T-04 Schema',
+    url: 'https://github.com/vibing-out/vbt/issues/12',
+    labeledBy: 'warp-agent',
+    comment: { author: 'warp-agent', body: 'Which table holds voters?\nShould it be soft-deleted?', url: 'https://github.com/vibing-out/vbt/issues/12#issuecomment-1' },
+    ...overrides,
+  })
+  const webhook = 'https://hooks.slack.com/services/T000/B000/secret'
+  const okFetch = () => vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response('ok', { status: 200 }))
+
+  it('formats a bold title link, who added the label, and the newest comment as a quote block', () => {
+    expect(slackMessage(notice())).toBe(
+      [
+        '<!here> *<https://github.com/vibing-out/vbt/issues/12|#12 T-04 Schema>*',
+        '`needs-human` added by warp-agent',
+        '<https://github.com/vibing-out/vbt/issues/12#issuecomment-1|Newest comment> by warp-agent:',
+        '> Which table holds voters?',
+        '> Should it be soft-deleted?',
+        'Reply on the issue, then remove `needs-human` to resume.',
+      ].join('\n'),
+    )
+  })
+  it('says so when the issue has no comments or the label has no actor', () => {
+    expect(slackMessage(notice({ comment: null, labeledBy: null }))).toBe(
+      ['<!here> *<https://github.com/vibing-out/vbt/issues/12|#12 T-04 Schema>*', '`needs-human` added by an unknown actor', '_No comments on the issue yet._', 'Reply on the issue, then remove `needs-human` to resume.'].join('\n'),
+    )
+  })
+  it('escapes &, < and > so ticket text cannot form links or close the quote', () => {
+    expect(slackText('a & b <https://evil|click> > c')).toBe('a &amp; b &lt;https://evil|click&gt; &gt; c')
+  })
+  it('strips @channel, @here, @everyone and <!...> commands, including pieces that rejoin', () => {
+    expect(slackText('hey @channel and @HERE and @everyone')).toBe('hey  and  and ')
+    expect(slackText('ping <!channel> <!subteam^S123|devs> <!date^1|x>')).toBe('ping   ')
+    expect(slackText('<<!here>!here>')).toBe('')
+    expect(slackText('@@here! @hereford')).toBe('@! @hereford')
+  })
+  it('escapes and strips the title and the comment in the full message', () => {
+    const text = slackMessage(notice({ title: 'Fix <a> & @here', comment: { author: 'x', body: '<!channel> 1 > 0', url: 'u' } }))
+    expect(text).toContain('|#12 Fix &lt;a&gt; &amp; >*')
+    expect(text).toContain('\n>  1 &gt; 0')
+    // Only our own leading @here survives; nothing from the ticket text can mention anyone.
+    expect(text.startsWith('<!here> ')).toBe(true)
+    expect(text.slice('<!here> '.length)).not.toMatch(/<!|@here|@channel/)
+  })
+  it('trims the comment to 1,500 characters without splitting an emoji', () => {
+    expect(trimmed('short')).toBe('short')
+    const long = trimmed('x'.repeat(2_000))
+    expect(long).toBe(`${'x'.repeat(1_500)}…`)
+    expect(trimmed(`${'x'.repeat(1_499)}😀😀`)).toBe(`${'x'.repeat(1_499)}😀…`)
+    const quoted = slackMessage(notice({ comment: { author: 'a', body: 'y'.repeat(5_000), url: 'u' } })).split('\n').at(-2)
+    expect(quoted).toBe(`> ${'y'.repeat(1_500)}…`)
+  })
+  it('skips without reading GitHub or posting when the webhook is unset or empty', async () => {
+    for (const slackWebhook of [undefined, '']) {
+      const github = fakeGitHub([], undefined, notice())
+      const post = okFetch()
+      const lines: string[] = []
+      expect(await notify(12, { github, context: async () => '', slackWebhook, fetch: post, log: (l) => lines.push(l) })).toBe('skipped')
+      expect(lines).toEqual(['Slack webhook not configured; skipping'])
+      expect(post).not.toHaveBeenCalled()
+      expect(github.calls).toEqual([])
+    }
+  })
+  it('posts the message as JSON to the webhook', async () => {
+    const github = fakeGitHub([], undefined, notice())
+    const post = okFetch()
+    expect(await notify(12, { github, context: async () => '', slackWebhook: webhook, fetch: post, log: silent })).toBe('posted')
+    expect(github.calls).toEqual(['read notice #12 needs-human'])
+    const [url, init] = post.mock.calls[0] ?? []
+    expect(url).toBe(webhook)
+    expect(init?.method).toBe('POST')
+    expect(JSON.parse(String(init?.body))).toEqual({ text: slackMessage(notice()), unfurl_links: false, unfurl_media: false })
+  })
+  it('fails on a rejected post without putting the webhook URL in the error', async () => {
+    const github = fakeGitHub([], undefined, notice())
+    const post = vi.fn(async () => new Response('invalid_payload', { status: 400 }))
+    const err = await notify(12, { github, context: async () => '', slackWebhook: webhook, fetch: post, log: silent }).catch((e: Error) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).toBe('Slack webhook returned 400: invalid_payload')
+  })
+  describe('from landed, since a label added with GITHUB_TOKEN starts no workflow', () => {
+    const pull: Pull = { number: 40, url: 'https://github.com/vibing-out/vbt/pull/40', merged: true, base: 'epic/2', body: 'Ticket: #12', mergeCommit: 'a'.repeat(40) }
+    const failing = async (): Promise<string> => {
+      throw new Error('context-log block missing')
+    }
+    it('posts after labeling and commenting when ingestion fails', async () => {
+      const github = fakeGitHub([ticket()], pull, notice())
+      const post = okFetch()
+      await expect(landed(40, { github, context: failing, slackWebhook: webhook, fetch: post, log: silent })).rejects.toThrow(/ingestion failed for #12/)
+      expect(github.calls).toEqual(['label #12 +needs-human', 'comment #12 Context ingestion failed for pull request #40, so dependent tickets were not dispatched.', 'read notice #12 needs-human'])
+      expect(post).toHaveBeenCalledOnce()
+    })
+    it('still reports the ingestion error when the Slack post fails', async () => {
+      const github = fakeGitHub([ticket()], pull, notice())
+      const lines: string[] = []
+      const post = vi.fn(async () => new Response('no_service', { status: 404 }))
+      await expect(landed(40, { github, context: failing, slackWebhook: webhook, fetch: post, log: (l) => lines.push(l) })).rejects.toThrow(/ingestion failed for #12: context-log block missing/)
+      expect(lines).toEqual(['#12: Slack notification failed: Slack webhook returned 404: no_service'])
+    })
+  })
+})
+
+describe('webhookUrl', () => {
+  const url = 'https://hooks.slack.com/services/T000/B000/abcDEF123'
+  it.each([
+    ['a bare URL', url],
+    ['surrounding whitespace and quotes', `  "${url}"\n`],
+    ['the whole curl example Slack shows', `curl -X POST -H 'Content-type: application/json' --data '{"text":"Hello"}' ${url}`],
+  ])('extracts the URL from %s', (_label, secret) => {
+    expect(webhookUrl(secret)).toBe(url)
+  })
+  it('returns null when no Slack webhook URL is present', () => {
+    expect(webhookUrl('not a url')).toBeNull()
+    expect(webhookUrl(undefined)).toBeNull()
+  })
+})
+
+describe('epicReady from landed', () => {
+  // E1 (#2) holds T-02 (#11) and T-04 (#12); pull request #40 merges T-02 into epic/2. Built fresh per
+  // test, since the fake's close mutates the sub-issue states.
+  const webhook = 'https://hooks.slack.com/services/T000/B000/secret'
+  const pull: Pull = {
+    number: 40,
+    url: 'https://github.com/vibing-out/vbt/pull/40',
+    merged: true,
+    base: 'epic/2',
+    body: 'Ticket: #11',
+    mergeCommit: 'a'.repeat(40),
+  }
+  const epicPull = (draft = true): EpicPull => ({ number: 39, url: 'https://github.com/vibing-out/vbt/pull/39', draft, nodeId: 'PR_39', head: 'epic/2' })
+  // `landedState` is T-02's state as the epic reports it: open when `landed` will close it, closed when
+  // a test calls epicReady directly.
+  const setup = (siblingState: IssueRef['state'], epicPr: EpicPull | null, landedState: IssueRef['state'] = 'OPEN') => {
+    const e1Ref = ref(2, 'E1 Foundation', 'OPEN', ['epic'])
+    const e1: Issue = { ...e1Ref, parent: null, subIssues: [ref(11, 'T-02 Domain', landedState), ref(12, 'T-04 Schema', siblingState)], blockedBy: [], blocking: [] }
+    const t02: Issue = { ...ref(11, 'T-02 Domain', 'OPEN', ['factory-ready']), parent: { ...e1Ref, subIssues: [] }, subIssues: [], blockedBy: [], blocking: [] }
+    const github = fakeGitHub([e1, t02], pull, undefined, epicPr)
+    const post = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response('ok', { status: 200 }))
+    const lines: string[] = []
+    const deps = { github, context: async () => 'ok', fetch: post, log: (l: string) => lines.push(l) }
+    return { github, post, lines, deps }
+  }
+
+  it('updates the branch, dispatches its checks, marks it ready, comments and posts to Slack once the last ticket closes', async () => {
+    const { github, post, deps } = setup('CLOSED', epicPull())
+    await landed(40, { ...deps, slackWebhook: webhook })
+    expect(github.calls).toEqual([
+      'close #11',
+      'find epic pull for #2',
+      'update #39',
+      'dispatch ci.yml on epic/2',
+      'dispatch factory.yml on epic/2 {"pr":"39"}',
+      'ready #39',
+      'comment #39 All tickets in E1 have merged. Ready for human approval into main.',
+    ])
+    expect(post).toHaveBeenCalledOnce()
+    const [url, init] = post.mock.calls[0] ?? []
+    expect(url).toBe(webhook)
+    expect(JSON.parse(String(init?.body)).text).toBe('<!here> *<https://github.com/vibing-out/vbt/pull/39|E1 Foundation>* is ready for approval into main')
+  })
+  it('does nothing while a sibling ticket is still open', async () => {
+    const { github, post, lines, deps } = setup('OPEN', epicPull())
+    await landed(40, { ...deps, slackWebhook: webhook })
+    expect(github.calls).toEqual(['close #11'])
+    expect(post).not.toHaveBeenCalled()
+    expect(lines).toContain('epic #2: waiting on #12')
+  })
+  it('does not comment or post again when the epic pull request is already ready', async () => {
+    const { github, post, deps } = setup('CLOSED', epicPull(false), 'CLOSED')
+    expect(await epicReady(2, { ...deps, slackWebhook: webhook })).toBe('already-ready')
+    expect(github.calls).toEqual(['find epic pull for #2'])
+    expect(post).not.toHaveBeenCalled()
+  })
+  it('a second run after a successful one repeats nothing', async () => {
+    const { github, post, deps } = setup('CLOSED', epicPull(), 'CLOSED')
+    expect(await epicReady(2, { ...deps, slackWebhook: webhook })).toBe('ready')
+    expect(await epicReady(2, { ...deps, slackWebhook: webhook })).toBe('already-ready')
+    expect(github.calls.filter((c) => c.startsWith('comment'))).toHaveLength(1)
+    expect(post).toHaveBeenCalledOnce()
+  })
+  it('logs and returns when no epic pull request is open', async () => {
+    const { github, lines, deps } = setup('CLOSED', null)
+    await landed(40, deps)
+    expect(github.calls).toEqual(['close #11', 'find epic pull for #2'])
+    expect(lines).toContain('epic #2: every ticket is closed, but no open pull request from epic/2 into main')
+  })
+  it('still marks it ready and comments, but posts nothing, without a webhook', async () => {
+    for (const slackWebhook of [undefined, '']) {
+      const { github, post, lines, deps } = setup('CLOSED', epicPull(), 'CLOSED')
+      expect(await epicReady(2, { ...deps, slackWebhook })).toBe('ready')
+      expect(github.calls).toContain('ready #39')
+      expect(github.calls).toContain('comment #39 All tickets in E1 have merged. Ready for human approval into main.')
+      expect(post).not.toHaveBeenCalled()
+      expect(lines).toContain('Slack webhook not configured; skipping')
+    }
+  })
+  it('logs a failure without failing landed, since the ticket has already merged', async () => {
+    const { github, lines, deps } = setup('CLOSED', epicPull())
+    github.updateBranch = async () => {
+      throw new Error('422 from PUT update-branch: merge conflict')
+    }
+    await expect(landed(40, deps)).resolves.toBeUndefined()
+    // Neither check is dispatched: the head is unchanged, so a dispatch would only re-test the old commit.
+    expect(github.calls).toEqual(['close #11', 'find epic pull for #2'])
+    expect(lines).toContain('epic #2: readiness step failed: 422 from PUT update-branch: merge conflict')
+  })
+  it('dispatches the checks even when the branch was already current with main', async () => {
+    const { github, deps } = setup('CLOSED', epicPull(), 'CLOSED')
+    github.updateBranch = async () => false
+    expect(await epicReady(2, deps)).toBe('ready')
+    expect(github.calls.filter((c) => c.startsWith('dispatch'))).toEqual(['dispatch ci.yml on epic/2', 'dispatch factory.yml on epic/2 {"pr":"39"}'])
+  })
+  it('sends the dispatch to the workflow dispatches endpoint with the branch and input', async () => {
+    const requests: { method: string; url: string; body: unknown }[] = []
+    vi.stubGlobal('fetch', async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ method: String(init?.method), url: String(url), body: JSON.parse(String(init?.body)) })
+      return new Response(null, { status: 204 })
+    })
+    try {
+      const github = restGitHub('token', 'vibing-out/vbt')
+      await github.dispatchWorkflow('ci.yml', 'epic/2')
+      await github.dispatchWorkflow('factory.yml', 'epic/2', { pr: '39' })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(requests).toEqual([
+      { method: 'POST', url: 'https://api.github.com/repos/vibing-out/vbt/actions/workflows/ci.yml/dispatches', body: { ref: 'epic/2' } },
+      { method: 'POST', url: 'https://api.github.com/repos/vibing-out/vbt/actions/workflows/factory.yml/dispatches', body: { ref: 'epic/2', inputs: { pr: '39' } } },
+    ])
+  })
+  it('escapes the epic title in the Slack message', () => {
+    expect(epicReadyMessage(epicPull(), 'E1 <@here> & co')).toBe('<!here> *<https://github.com/vibing-out/vbt/pull/39|E1 &lt;&gt; &amp; co>* is ready for approval into main')
   })
 })

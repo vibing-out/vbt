@@ -10,7 +10,7 @@ Verifiable Ballot Tracking (VBT): a public tracker that follows each ballot from
 
 | Role | Who | Does |
 |---|---|---|
-| **Coordinator session** | `<Shawn's or Austin's>` Claude session, chosen at kickoff | Runs the 9:00 ticket creation once, and sends tasks to the factory by hand only if dispatch breaks. Anyone can create single tickets |
+| **Coordinator session** | Austin's Claude session (MASTER CONTROL) | Runs the 9:00 ticket creation once, and sends tasks to the factory by hand only if dispatch breaks. Anyone can create single tickets |
 | Local workers | Any Claude or Codex session on either laptop | Work only `local` tickets assigned to their own human |
 | Approvers | Shawn or Austin | Approve epic pull requests into `main` |
 
@@ -28,9 +28,15 @@ Agents read this to stay in their own area. Shared interfaces change only in the
 
 ## Live URLs
 
-- Production:
+- Production: https://www.ballottrack.org (Vercel project `vvpat/vbt`; `ballottrack.org` redirects here)
 - Epic previews: on each epic pull request
 - Factory dashboard: https://platform.warp.dev/5UtMcqD5xE2zDbegRaz6mi/dashboard
+- Projects board: https://github.com/orgs/vibing-out/projects/1
+- Context log: Supabase project `vbt-context-log`, repo https://github.com/vibing-out/vbt-context
+
+## Not tickets
+
+- T-14 (the judges' walkthrough) has no issue. The coordinator drafts it from the context log at 4:00, per the playbook.
 
 ## Demo script (5 minutes)
 

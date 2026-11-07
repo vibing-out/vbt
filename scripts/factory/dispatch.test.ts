@@ -282,6 +282,7 @@ describe('landed', () => {
   const pull: Pull = {
     number: 40,
     url: 'https://github.com/vibing-out/vbt/pull/40',
+    author: 'someone',
     merged: true,
     base: 'epic/2',
     body: 'Ticket: #11\n\n```context-log\n{"version":1,"decisions":[],"corrections":[]}\n```',
@@ -293,6 +294,12 @@ describe('landed', () => {
     return { github: fakeGitHub([t02, t04], pull) }
   }
 
+  it('skips ingestion for a merged Dependabot pull request into main with no block', async () => {
+    const dependabot: Pull = { ...pull, author: 'dependabot[bot]', base: 'main', body: 'Bumps foo from 1 to 2.' }
+    const runs: string[] = []
+    await landed(40, { github: fakeGitHub([], dependabot), context: async (args) => (runs.push(args[0] ?? ''), 'ok'), log: silent })
+    expect(runs).toEqual([])
+  })
   it('ingests, closes the ticket and re-checks what it was blocking', async () => {
     const { github } = setup()
     const runs: string[] = []
@@ -417,7 +424,7 @@ describe('context refresh', () => {
   })
   it('runs from landed after the ingest, so the new entries are in the refreshed comment', async () => {
     const { t02, github } = setup()
-    const pull: Pull = { number: 40, url: 'https://github.com/vibing-out/vbt/pull/40', merged: true, base: 'epic/2', body: 'Ticket: #11', mergeCommit: 'a'.repeat(40) }
+    const pull: Pull = { number: 40, url: 'https://github.com/vibing-out/vbt/pull/40', author: 'someone', merged: true, base: 'epic/2', body: 'Ticket: #11', mergeCommit: 'a'.repeat(40) }
     github.pull = async () => pull
     const order: string[] = []
     await landed(40, { github, context: async (args) => (order.push(args[0] ?? ''), 'ok'), log: silent })
@@ -455,7 +462,7 @@ describe('context refresh', () => {
 describe('contextCheck', () => {
   const body = (n: number): string => `Ticket: #${n}\n\n\`\`\`context-log\n{"version":1,"decisions":[],"corrections":[]}\n\`\`\``
   const pull = (overrides: Partial<Pull> = {}): Pull => ({
-    number: 46, url: 'https://github.com/vibing-out/vbt/pull/46', merged: false, base: 'epic/2', body: body(12), mergeCommit: null, ...overrides,
+    number: 46, url: 'https://github.com/vibing-out/vbt/pull/46', author: 'someone', merged: false, base: 'epic/2', body: body(12), mergeCommit: null, ...overrides,
   })
   const run = (issue: Issue, pr: Pull): Promise<void> => contextCheck(pr.number, { github: fakeGitHub([issue], pr), context: async () => 'ok', log: silent })
 
@@ -470,6 +477,27 @@ describe('contextCheck', () => {
   })
   it('does not look up a ticket for a pull request into main', async () => {
     await expect(run(ticket({ state: 'CLOSED' }), pull({ base: 'main', body: body(99) }))).resolves.toBeUndefined()
+  })
+  describe('Dependabot', () => {
+    const dependabot = { author: 'dependabot[bot]', base: 'main' }
+    const checked: string[][] = []
+    const runChecked = (pr: Pull): Promise<void> =>
+      contextCheck(pr.number, { github: fakeGitHub([ticket()], pr), context: async (args) => { checked.push(args); return 'ok' }, log: silent })
+    it('passes without running the check when the body has no context-log block', async () => {
+      checked.length = 0
+      await runChecked(pull({ ...dependabot, body: 'Bumps foo from 1 to 2.' }))
+      expect(checked).toEqual([])
+    })
+    it('still validates a block that is present', async () => {
+      checked.length = 0
+      await runChecked(pull({ ...dependabot, body: body(1) }))
+      expect(checked).toEqual([['check']])
+    })
+    it('does not exempt other authors', async () => {
+      checked.length = 0
+      await runChecked(pull({ base: 'main', body: 'no block' }))
+      expect(checked).toEqual([['check']])
+    })
   })
 })
 
@@ -611,7 +639,7 @@ describe('Slack notification', () => {
     expect((err as Error).message).toBe('Slack webhook returned 400: invalid_payload')
   })
   describe('from landed, since a label added with GITHUB_TOKEN starts no workflow', () => {
-    const pull: Pull = { number: 40, url: 'https://github.com/vibing-out/vbt/pull/40', merged: true, base: 'epic/2', body: 'Ticket: #12', mergeCommit: 'a'.repeat(40) }
+    const pull: Pull = { number: 40, url: 'https://github.com/vibing-out/vbt/pull/40', author: 'someone', merged: true, base: 'epic/2', body: 'Ticket: #12', mergeCommit: 'a'.repeat(40) }
     const failing = async (): Promise<string> => {
       throw new Error('context-log block missing')
     }
@@ -654,6 +682,7 @@ describe('epicReady from landed', () => {
   const pull: Pull = {
     number: 40,
     url: 'https://github.com/vibing-out/vbt/pull/40',
+    author: 'someone',
     merged: true,
     base: 'epic/2',
     body: 'Ticket: #11',

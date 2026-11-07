@@ -10,6 +10,8 @@ const nextConfig: NextConfig = {
       { source: "/", destination: "/track", permanent: false },
       // The receipt moved out of /track so the tracker sources hold no contact wording.
       { source: "/track/:code/receipt", destination: "/receipt/:code", permanent: false },
+      // The printable demo sheet sits outside /track for the same reason.
+      { source: "/track/demo-receipts", destination: "/demo-receipts", permanent: false },
     ];
   },
 };

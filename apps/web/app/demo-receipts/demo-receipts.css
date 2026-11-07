@@ -1,0 +1,33 @@
+/* The judge sheet: four receipt slips on one letter page, two by two. Scoped to .vbt-demo-sheet except
+   @page, which only this route's print uses. */
+
+@page {
+  size: letter;
+  margin: 0.35in;
+}
+
+@media print {
+  .vbt-demo-sheet {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.2in;
+    padding: 0 !important;
+    max-width: none !important;
+  }
+
+  .vbt-demo-sheet .vbt-slip {
+    padding: 0.15in;
+    gap: 0.08in;
+    font-size: 9pt;
+    line-height: 1.25;
+  }
+
+  .vbt-demo-sheet .vbt-slip * {
+    font-size: inherit;
+    line-height: inherit;
+  }
+
+  .vbt-demo-sheet .vbt-slip [data-slot="code"] {
+    font-size: 11pt;
+  }
+}

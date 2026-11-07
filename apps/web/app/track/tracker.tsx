@@ -174,7 +174,7 @@ function BallotJourney({ code, data, stale }: { code: string; data: TrackResult;
                 data-status={entry.status}
                 className="flex flex-col gap-1 border-l-2 border-line pl-4"
               >
-                <h2 className="text-body-lg font-semibold text-ink">{entry.label}</h2>
+                <h3 className="text-body-lg font-semibold text-ink">{entry.label}</h3>
                 {date && <p className="text-small text-ink-muted">{date}</p>}
                 <p className="text-body text-ink">{detailLine(entry.status, data)}</p>
                 {afterReview && <p className="text-body text-ink">{REVIEW_ACCEPTED}</p>}

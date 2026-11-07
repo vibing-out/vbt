@@ -5,9 +5,12 @@
 #   unblock        an issue closes: re-check the blocked issues it held back (for an epic, those waiting on any of its tickets)
 #   context-check  a pull request into epic/* or main opens or changes: its body needs one valid context-log block
 #                  (a required check), and an epic/* one also needs one `Ticket: #n` line
+#   notify         an issue gets `needs-human` (from a person or Warp's GitHub app): post it to the team Slack channel.
+#                  `landed` adds `needs-human` with GITHUB_TOKEN, which starts no workflow, so it posts in-process.
 #
 # Repository secrets required (the factory-dispatch identity in the context log, see the vbt-context README):
 #   CONTEXT_SUPABASE_URL, CONTEXT_SUPABASE_PUBLISHABLE_KEY, CONTEXT_EMAIL, CONTEXT_PASSWORD
+# Optional: SLACK_WEBHOOK_URL, the team channel's Slack incoming webhook. Without it, notify logs and skips.
 #
 # Safety: only issue and pull request numbers reach `run:`, through env; titles and bodies are read by the
 # script from the API. Every job checks out the default branch, so a pull request can't change the script
@@ -71,6 +74,7 @@ jobs:
           SUPABASE_PUBLISHABLE_KEY: ${{ secrets.CONTEXT_SUPABASE_PUBLISHABLE_KEY }}
           CONTEXT_EMAIL: ${{ secrets.CONTEXT_EMAIL }}
           CONTEXT_PASSWORD: ${{ secrets.CONTEXT_PASSWORD }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: node scripts/factory/dispatch.ts landed "$PR"
 
   unblock:
@@ -112,3 +116,20 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
         run: node scripts/factory/dispatch.ts context-check "$PR"
+
+  notify:
+    if: github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'needs-human'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: node scripts/factory/dispatch.ts notify "$ISSUE"

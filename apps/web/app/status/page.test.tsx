@@ -49,3 +49,9 @@ test("a failed context-log read is shown as unavailable, not as an empty log", a
   expect(html).not.toContain("Context log: no entries");
   expect(html).toContain('data-testid="greeting">Greeting unavailable');
 });
+
+test("links judges to the how-it-was-built page", async () => {
+  const html = await render();
+  expect(html).toContain('data-testid="factory-link"');
+  expect(html).toContain('href="/factory"');
+});

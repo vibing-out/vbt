@@ -12,6 +12,11 @@ export function TrackerShell({ children }: { children: ReactNode }): React.JSX.E
         <span className="text-small text-ink-muted">Marion County</span>
       </header>
       <main className="mx-auto flex max-w-[560px] flex-col gap-6 px-4 pb-12">{children}</main>
+      <footer data-print="hide" className="mx-auto max-w-[560px] px-4 pb-8 text-small text-ink-muted">
+        <Link href="/factory" data-testid="factory-link" className="inline-block min-h-11 py-2 underline underline-offset-4">
+          How it was built
+        </Link>
+      </footer>
     </div>
   );
 }

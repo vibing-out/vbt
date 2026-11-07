@@ -18,6 +18,11 @@ export default async function Home() {
           Track your ballot →
         </Link>
       </p>
+      <p>
+        <Link href="/factory" data-testid="factory-link" style={{ color: tokens.color.accent }}>
+          How it was built →
+        </Link>
+      </p>
       <p data-testid="greeting">{greeting ?? "Greeting unavailable"}</p>
       <p>{placeholderStatus()}</p>
       <p data-testid="flag-pipeline-smoke">pipeline-smoke flag: {smoke ? "on" : "off"}</p>

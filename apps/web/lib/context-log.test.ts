@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { countContextEntries } from "./context-log";
+import { countContextEntries, parseCorrection, recentCorrections } from "./context-log";
 
 const env = {
   CONTEXT_SUPABASE_URL: "https://context.example.co/",
@@ -78,4 +78,48 @@ test("returns null (not 0) when search_context returns a non-list", async () => 
   const fetchMock = mockSupabase({ id: 1 });
   expect(await countContextEntries(env)).toBeNull();
   expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+const correctionRow = {
+  id: 42,
+  created_at: "2026-11-07T15:04:05Z",
+  topic: "T-04",
+  body: "Cast order came from the base table | caught by: code reviewer | fix: read it from the view | evidence: review comment",
+};
+
+test("recentCorrections asks search_context for corrections only and splits each body", async () => {
+  const fetchMock = mockSupabase([correctionRow]);
+  expect(await recentCorrections(5, env)).toEqual([
+    {
+      id: 42,
+      date: "2026-11-07",
+      topic: "T-04",
+      claim: "Cast order came from the base table",
+      caughtBy: "code reviewer",
+      fix: "read it from the view",
+    },
+  ]);
+  const [, rpc] = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
+  expect(JSON.parse(rpc.body as string)).toMatchObject({ p_type: "correction", p_limit: 5 });
+});
+
+test("recentCorrections skips a row whose body is not in the stored shape", async () => {
+  mockSupabase([correctionRow, { id: 7, body: "free text with no parts" }, { body: "no id | caught by: x | fix: y" }]);
+  expect((await recentCorrections(5, env))?.map((c) => c.id)).toEqual([42]);
+});
+
+test("recentCorrections returns null (not an empty list) when the log can't be read", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response("bad", { status: 400 })));
+  expect(await recentCorrections(5, env)).toBeNull();
+  expect(await recentCorrections(5, {})).toBeNull();
+});
+
+test("parseCorrection keeps a pipe inside the claim and tolerates a missing evidence part", () => {
+  expect(parseCorrection({ id: 1, body: "a | b claim | caught by: test | fix: guard" })).toMatchObject({
+    claim: "a | b claim",
+    caughtBy: "test",
+    fix: "guard",
+    date: "",
+    topic: "",
+  });
 });

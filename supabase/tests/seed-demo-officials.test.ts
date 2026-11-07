@@ -1,11 +1,14 @@
 // T-20 AC3 (demo accounts): the seeding flow, against a fake project. The live sign-in on a preview
 // deploy is apps/web/e2e/demo-officials.spec.ts.
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { toOfficialGrant } from "@vbt/domain";
 import { describe, expect, test } from "vitest";
 import { SUPABASE_DIR } from "../lib/db.ts";
 import {
+  CREDENTIALS_FILE,
   DEFAULT_COUNTY,
   DEFAULT_PRECINCT,
   type DemoAccount,
@@ -166,9 +169,20 @@ describe("seeding", () => {
 describe("secrets stay out of the repo", () => {
   const script = readFileSync(join(SUPABASE_DIR, "scripts", "seed-demo-officials.ts"), "utf8");
 
-  test("the script writes no files and refuses to run in CI", () => {
-    expect(script).not.toMatch(/writeFile|appendFile|createWriteStream/);
+  test("the script prints no secret and refuses to run in CI", () => {
+    // Secrets go only to the credentials file; the terminal gets its path. No console call takes a seed line.
+    expect(script).not.toMatch(/console\.\w+\(line\)|print: console|\(line\) => console/);
+    expect(script.match(/writeFileSync\(/g)).toHaveLength(1);
+    expect(script).toMatch(/writeFileSync\(CREDENTIALS_FILE, [^;]*\{ mode: 0o600 \}\)/);
+    expect(script).toMatch(/chmodSync\(CREDENTIALS_FILE, 0o600\)/);
+    expect(script).not.toMatch(/appendFile|createWriteStream/);
     expect(script).toMatch(/if \(process\.env\.CI\) throw/);
+  });
+
+  test("the credentials file is git-ignored", () => {
+    const repo = join(SUPABASE_DIR, "..");
+    expect(fileURLToPath(CREDENTIALS_FILE)).toBe(join(repo, ".env.demo-officials.local"));
+    expect(execFileSync("git", ["check-ignore", "-q", ".env.demo-officials.local"], { cwd: repo }).toString()).toBe("");
   });
 
   test("CI never runs it", () => {

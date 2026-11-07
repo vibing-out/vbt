@@ -25,7 +25,9 @@ test("there is at least one official route (the T-20 probe)", () => {
 });
 
 const CALL = /\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*await\s+requireRole\(/g;
-const escape = (name: string) => name.replace(/\$/g, "\\$");
+// Escapes every regular-expression metacharacter, backslash included (an identifier can only hold `$`
+// today, but a partial escape breaks as soon as the pattern changes).
+const escape = (name: string) => name.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
 
 /**
  * Why a handler body does not use requireRole's result, or null when it does. Requires exactly one

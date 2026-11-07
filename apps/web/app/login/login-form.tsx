@@ -2,6 +2,8 @@
 
 import { createBrowserClient } from "@supabase/ssr";
 import { useRouter } from "next/navigation";
+import { Button } from "@vbt/ui/components/button";
+import { Input } from "@vbt/ui/components/input";
 import { type FormEvent, useState } from "react";
 
 // Official sign-in (T-09, on T-20's foundation): password, then the TOTP code, which raises the session to
@@ -41,31 +43,40 @@ export function LoginForm({ url, publishableKey }: { url: string; publishableKey
     router.refresh();
   }
 
+  const alert = message ? (
+    <p role="alert" className="text-body text-status-discarded">
+      {message}
+    </p>
+  ) : null;
+
   return step === "password" ? (
-    <form onSubmit={signIn} data-testid="login-password">
-      <p>
-        <label>
-          Email <input name="email" type="email" autoComplete="username" required />
-        </label>
-      </p>
-      <p>
-        <label>
-          Password <input name="password" type="password" autoComplete="current-password" required />
-        </label>
-      </p>
-      <button type="submit">Continue</button>
-      {message && <p role="alert">{message}</p>}
+    <form onSubmit={signIn} data-testid="login-password" className="flex flex-col gap-4">
+      <Input id="login-email" name="email" type="email" label="Email" mode="admin" autoComplete="username" required />
+      <Input id="login-password" name="password" type="password" label="Password" mode="admin" autoComplete="current-password" required />
+      <Button type="submit" mode="admin">
+        Continue
+      </Button>
+      {alert}
     </form>
   ) : (
-    <form onSubmit={verify} data-testid="login-code">
-      <p>
-        <label>
-          Code from your authenticator app{" "}
-          <input name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" required />
-        </label>
-      </p>
-      <button type="submit">Sign in</button>
-      {message && <p role="alert">{message}</p>}
+    <form onSubmit={verify} data-testid="login-code" className="flex flex-col gap-4">
+      <Input
+        id="login-code-input"
+        name="code"
+        label="Code from your authenticator app"
+        hint="The 6-digit code for VBT."
+        mode="admin"
+        variant="code"
+        inputMode="numeric"
+        autoComplete="one-time-code"
+        pattern="[0-9]{6}"
+        required
+        autoFocus
+      />
+      <Button type="submit" mode="admin">
+        Sign in
+      </Button>
+      {alert}
     </form>
   );
 }

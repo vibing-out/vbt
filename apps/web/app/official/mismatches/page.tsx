@@ -1,9 +1,12 @@
 import { OFFICIAL_ROLES } from "@vbt/domain";
+import { Button } from "@vbt/ui/components/button";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@vbt/ui/components/table";
 import { mismatchReport } from "../../../lib/mismatches";
 import { requireOfficialPage } from "../../../lib/page-guard";
 import { serviceDb } from "../../../lib/official-db";
 import { pageTarget } from "../scope";
-import { Forbidden, OfficialNav } from "../ui";
+import { homePath, OfficialShell, Section } from "../shell";
+import { Forbidden, ScopePicker, StatusCell } from "../ui";
 
 // Mismatch report (T-09): mismatched or challenged ballots in a precinct or county, with the check that
 // failed and the date (never the time). Officials only; ?precinct=<id> or ?county=<id>, else their own scope.
@@ -16,54 +19,62 @@ export default async function MismatchesPage({ searchParams }: { searchParams: P
   const official = await requireOfficialPage(OFFICIAL_ROLES, requested ?? undefined);
   if (!official) return <Forbidden />;
 
+  const home = homePath(official);
   const target = requested ?? pageTarget({}, official);
   if (!target) {
     return (
-      <main>
-        <h1>Mismatch report</h1>
-        <OfficialNav />
-        <p>Add ?precinct=&lt;id&gt; or ?county=&lt;id&gt; to choose a scope.</p>
-      </main>
+      <OfficialShell title="Mismatch report" home={home} description="Ballots whose machine record did not match, by county or precinct.">
+        <ScopePicker action="/official/mismatches" precinct />
+      </OfficialShell>
     );
   }
   const rows = await mismatchReport(target, serviceDb());
   return (
-    <main>
-      <h1>
-        Mismatch report: {target.scope} {target.id}
-      </h1>
-      <OfficialNav />
-      <p>
-        <a href={`/api/reports/mismatches?${target.scope}=${encodeURIComponent(target.id)}`}>Download as JSON</a>
-      </p>
+    <OfficialShell
+      title={`Mismatch report: ${target.scope} ${target.id}`}
+      home={home}
+      description={`${rows.length} ${rows.length === 1 ? "ballot" : "ballots"} flagged. Dates only, never a time of day.`}
+    >
+      <div className="flex flex-wrap gap-2">
+        <Button asChild mode="admin" variant="secondary">
+          <a href={`/api/reports/mismatches?${target.scope}=${encodeURIComponent(target.id)}`}>Download as JSON</a>
+        </Button>
+        {target.scope === "county" ? (
+          <Button asChild mode="admin" variant="secondary">
+            <a href={`/official/challenges?county=${encodeURIComponent(target.id)}`}>Open the challenge queue</a>
+          </Button>
+        ) : null}
+      </div>
       {rows.length === 0 ? (
-        <p>No mismatches.</p>
+        <Section title="No mismatches" description="Every ballot in this scope matched its machine record." />
       ) : (
-        <table data-testid="mismatch-report">
-          <thead>
-            <tr>
-              <th scope="col">Tracking code</th>
-              <th scope="col">Precinct</th>
-              <th scope="col">Machine</th>
-              <th scope="col">Status</th>
-              <th scope="col">Check</th>
-              <th scope="col">Date detected</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table data-testid="mismatch-report">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Tracking code</TableHead>
+              <TableHead>Precinct</TableHead>
+              <TableHead>Machine</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Check</TableHead>
+              <TableHead>Date detected</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {rows.map((r) => (
-              <tr key={r.ballot_id}>
-                <td>{r.tracking_code}</td>
-                <td>{r.precinct_id}</td>
-                <td>{r.machine_id}</td>
-                <td>{r.current_status}</td>
-                <td>{r.reason ?? ""}</td>
-                <td>{r.detected_on ?? ""}</td>
-              </tr>
+              <TableRow key={r.ballot_id}>
+                <TableCell className="font-mono text-code whitespace-nowrap">{r.tracking_code}</TableCell>
+                <TableCell>{r.precinct_id}</TableCell>
+                <TableCell>{r.machine_id}</TableCell>
+                <TableCell>
+                  <StatusCell status={r.current_status} />
+                </TableCell>
+                <TableCell>{r.reason ?? ""}</TableCell>
+                <TableCell className="whitespace-nowrap tabular-nums">{r.detected_on ?? ""}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       )}
-    </main>
+    </OfficialShell>
   );
 }

@@ -1,7 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { Button } from "@vbt/ui/components/button";
+import { Card, CardDescription, CardHeader } from "@vbt/ui/components/card";
 import { type FormEvent, useState } from "react";
+import { Message, type Note } from "./shell";
 
 // One-action batch with confirmation (T-09): the official confirms the number of ballots, and one
 // POST /api/batches (T-05) moves them all and publishes the signed stage record.
@@ -17,7 +20,7 @@ export interface BatchFormProps {
 
 export function BatchForm({ scope, scopeId, from, to, action, count }: BatchFormProps) {
   const router = useRouter();
-  const [message, setMessage] = useState<string | null>(null);
+  const [note, setNote] = useState<Note>(null);
   const [busy, setBusy] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -36,31 +39,42 @@ export function BatchForm({ scope, scopeId, from, to, action, count }: BatchForm
       });
       const body = (await response.json()) as { error?: string; ballot_count?: number; stage_record?: { id?: string } };
       if (response.ok) {
-        setMessage(
-          `Done: ${body.ballot_count} ballots moved to ${to}.` +
+        setNote({
+          text:
+            `Done: ${body.ballot_count} ballots moved to ${to}.` +
             (body.stage_record?.id ? ` Stage record ${body.stage_record.id} published.` : ""),
-        );
+          ok: true,
+        });
         router.refresh();
       } else {
-        setMessage(`Not done (${response.status}): ${body.error ?? "refused"}`);
+        setNote({ text: `Not done (${response.status}): ${body.error ?? "refused"}`, ok: false });
       }
     } catch {
-      setMessage("Not done: the request failed.");
+      setNote({ text: "Not done: the request failed.", ok: false });
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <form onSubmit={submit} data-testid={`batch-${to}`}>
-      <fieldset disabled={busy || count === 0}>
-        <legend>{action}</legend>
-        <p>
-          {count} ballots are at {from}.
-        </p>
-        <button type="submit">{action}</button>
-      </fieldset>
-      {message && <p role="status">{message}</p>}
-    </form>
+    <Card mode="admin">
+      <form onSubmit={submit} data-testid={`batch-${to}`} className="flex flex-col gap-4">
+        <fieldset disabled={busy || count === 0} className="flex flex-col gap-4 disabled:opacity-60">
+          <legend className="text-heading text-ink">{action}</legend>
+          <CardHeader>
+            <CardDescription mode="admin">
+              <span className="tabular-nums">{count}</span> ballots are at {from}. One action moves them all to {to} and
+              publishes a signed stage record.
+            </CardDescription>
+          </CardHeader>
+          <div>
+            <Button type="submit" mode="admin">
+              {action}
+            </Button>
+          </div>
+        </fieldset>
+        <Message note={note} />
+      </form>
+    </Card>
   );
 }

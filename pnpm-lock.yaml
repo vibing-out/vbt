@@ -294,9 +294,15 @@ importers:
 
   tools/scale-demo:
     dependencies:
+      '@vbt/crypto':
+        specifier: workspace:*
+        version: link:../../packages/crypto
       '@vbt/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@vbt/events':
+        specifier: workspace:*
+        version: link:../../packages/events
       pg:
         specifier: 8.23.1
         version: 8.23.1

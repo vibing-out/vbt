@@ -1,5 +1,4 @@
 import { expect, test } from "vitest";
-import { E3_PENDING } from "./crypto-adapter.ts";
 import { FAKE_KEY_ENV, fakeCrypto } from "./testing/fake-crypto.ts";
 import { runSeed, type SeedConnection } from "./write.ts";
 
@@ -36,7 +35,7 @@ test("AC7: a fake adapter is refused for a database that is not on localhost, be
   expect(connected).toBe(false);
 });
 
-test("AC5: the default adapter throws E3_PENDING before any connection is opened", async () => {
+test("AC5: with the real adapter, keys that cannot encrypt stop the build before any connection is opened", async () => {
   let connected = false;
   await expect(
     runSeed({ databaseUrl: "postgresql://x@db.example.com/postgres", options: OPTIONS, env: FAKE_KEY_ENV }, {
@@ -45,7 +44,7 @@ test("AC5: the default adapter throws E3_PENDING before any connection is opened
         return recorder().client;
       },
     }),
-  ).rejects.toThrow(E3_PENDING);
+  ).rejects.toThrow();
   expect(connected).toBe(false);
 });
 

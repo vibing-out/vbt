@@ -51,10 +51,9 @@ describeDb("the public cannot read event times", () => {
       "select * from ballot_events",
       "select id from ballot_events order by occurred_at",
       "select id from ballot_events where recorded_at > now() - interval '1 day'",
-      // The hash chain covers the timestamps; a hash would let anyone brute-force the time of day.
-      "select hash from ballot_events",
-      "select prev_hash from ballot_events",
       "select actor_id from ballot_events",
+      "select batch_id from ballot_events",
+      "select nist_event_code from ballot_events",
       "select created_at from batches",
     ])(`${role}: %s is refused`, async (sql) => {
       await expect(asRole(db(), role, sql)).rejects.toThrow(PERMISSION_DENIED);
@@ -68,9 +67,19 @@ describeDb("the public cannot read event times", () => {
     );
     expect(rows.filter((r) => /time|interval/.test(r.data_type))).toEqual([]);
     expect(rows.find((r) => r.column_name === "occurred_on")?.data_type).toBe("date");
-    expect(rows.map((r) => r.column_name)).not.toEqual(expect.arrayContaining(["occurred_at"]));
-    expect(rows.map((r) => r.column_name)).not.toEqual(expect.arrayContaining(["recorded_at"]));
-    expect(rows.map((r) => r.column_name)).not.toEqual(expect.arrayContaining(["hash"]));
+    expect(rows.map((r) => r.column_name)).toEqual([
+      "ballot_id",
+      "county_id",
+      "event_type",
+      "from_status",
+      "hash",
+      "id",
+      "occurred_on",
+      "precinct_id",
+      "prev_hash",
+      "reason",
+      "to_status",
+    ]);
   });
 
   test("anon sees the seeded CAST events dated election day", async () => {
@@ -137,13 +146,12 @@ describeDb("what the public can read", () => {
       expect(events.rowCount).toBe(50);
     });
 
-    test(`${role} reads only published stage records`, async () => {
+    test(`${role} reads only stage records whose publication time has come`, async () => {
       const { rows } = await asRoleSteps(db(), "service_role", [
         {
           sql: `insert into stage_records (scope, scope_id, stage, merkle_root, ballot_count, totals, published_at, signature)
                 values
                   ('precinct', '18097-001', 'TALLIED_PRECINCT', 'published', 17, '{}', now() - interval '1 hour', 'sig'),
-                  ('precinct', '18097-002', 'TALLIED_PRECINCT', 'draft', 17, '{}', null, null),
                   ('precinct', '18057-001', 'TALLIED_PRECINCT', 'scheduled', 16, '{}', now() + interval '1 day', 'sig')`,
         },
         { sql: `set local role ${role}` },

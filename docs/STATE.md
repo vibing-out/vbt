@@ -20,7 +20,7 @@ Agents read this to stay in their own area. Shared interfaces change only in the
 
 | Area | Lead | Paths |
 |---|---|---|
-| Factory, pipeline, CI, deploys | Shawn | `.github/`, `scripts/factory/`, `.claude/`, `vercel.json` |
+| Factory, pipeline, CI, deploys | Shawn | `.github/`, `scripts/factory/`, `.claude/` |
 | Data layer (schema, RLS, auth, both Supabase projects) | Austin | `supabase/`, `packages/events/` |
 | Design system and UI | Austin | `packages/ui/`, `apps/web/` (styling) |
 | Domain and crypto | Shared | `packages/domain/`, `packages/crypto/` |

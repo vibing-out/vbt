@@ -16,7 +16,7 @@ Verifiable Ballot Tracking (VBT): a public tracker that follows each ballot from
 
 ## Ownership
 
-Agents read this to stay in their own area. Shared interfaces change only in their own small pull request, merged first, with a `decision` entry.
+Agents read this to stay in their own area. Shared interfaces change only in their own small pull request, merged first, with the decision in its `context-log` block.
 
 | Area | Lead | Paths |
 |---|---|---|

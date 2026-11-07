@@ -10,7 +10,7 @@ echo "Branch: $(git branch --show-current 2>/dev/null) (behind origin/main by ${
 
 if [ -f scripts/doctor.mjs ]; then
   echo
-  echo "=== Setup check (npm run doctor for the full check) ==="
+  echo "=== Setup check (node scripts/doctor.mjs for the full check) ==="
   node scripts/doctor.mjs --fast 2>&1 || echo "This machine has drifted from the team setup. Fix the lines marked with an x before building."
 fi
 
@@ -20,7 +20,7 @@ cat docs/STATE.md 2>/dev/null || echo "(missing)"
 
 echo
 echo "=== Shared memory ==="
-echo "Search the context log (search_context) for your task's topic before starting, and log decisions and corrections (log_context). See CLAUDE.md."
+echo "Read the ticket's \"Context from earlier tickets\" comment before starting, and end your pull request with a context-log block. See CLAUDE.md."
 
 echo
 echo "=== local tickets assigned to you ==="

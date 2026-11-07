@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
-import { orderByChain, type PublicEvent } from "./timeline";
+import { FALLBACK_RANK, orderByChain, type PublicEvent } from "./index.ts";
+import { BALLOT_STATUSES } from "./status.ts";
 
 const ev = (hash: string, prev: string | null, to: string | null, type = to ? "STATUS_CHANGE" : "CAST"): PublicEvent => ({
   event_type: type,
@@ -49,4 +50,16 @@ test("a cycle falls back instead of looping", () => {
 
 test("no events is an empty, valid chain", () => {
   expect(orderByChain([])).toEqual({ events: [], chained: true });
+});
+
+test("an event with an unknown status sorts last in the fallback", () => {
+  const rows = [ev("c3", "zz", "NOT_A_STATUS"), ev("b2", "a1", "TALLIED_PRECINCT"), ev("a1", null, null)];
+  const { events, chained } = orderByChain(rows);
+  expect(chained).toBe(false);
+  expect(statuses(events)).toEqual(["CAST", "TALLIED_PRECINCT", "NOT_A_STATUS"]);
+});
+
+test("the fallback rank covers every status exactly once", () => {
+  expect(Object.keys(FALLBACK_RANK).sort()).toEqual([...BALLOT_STATUSES].sort());
+  expect(new Set(Object.values(FALLBACK_RANK)).size).toBe(BALLOT_STATUSES.length);
 });

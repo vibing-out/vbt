@@ -76,10 +76,13 @@ time, locked interfaces and owned areas, each with what you checked.
 the dispatch, if any) fixed or open.
 '#### Unambiguous fixes': each with file, line, impact, the fix, and
 the step-1 citation or step-2 URL that settles it (or 'self-evident' for
-a plain bug).
-'#### Judgment calls for a human': step-3 items only. Each with file,
-line, the question, its category (product or values choice, locked
-interface, or owned area), 'Sources checked:' listing every step-1 file
+a plain bug). Only code changes belong here. An item no code change can
+settle (human operations such as applying a migration, setting a
+secret, or an approval) goes under judgment calls, category 'human
+operations'.
+'#### Judgment calls for a human': step-3 items and human operations
+only. Each with file, line, the question, its category (product or
+values choice, locked interface, owned area, or human operations), 'Sources checked:' listing every step-1 file
 and step-2 URL you read for it, and 'Why none settles it:' in one line.
 Write 'none' under a subsection with no items.
 '### Decisions': one line per question you resolved, as a JSON object

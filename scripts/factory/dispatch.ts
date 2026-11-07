@@ -1,17 +1,23 @@
 // The factory's deterministic routing, with no dependencies and no model. GitHub Actions runs one
 // subcommand per event (see .github/workflows/factory.yml):
 //   node scripts/factory/dispatch.ts check <issue>         on `queued`: label factory-ready or blocked
-//   node scripts/factory/dispatch.ts landed <pr>           on a merge into epic/*: log, close, unblock; into main: log
+//   node scripts/factory/dispatch.ts landed <pr>           on a merge into epic/*: log, close, unblock, and mark the
+//                                                          epic pull request ready once its last ticket closes; into main: log
 //   node scripts/factory/dispatch.ts unblock <issue>       on an issue closing: re-check what it blocked
 //   node scripts/factory/dispatch.ts context-check <pr>    on epic/* and main pull requests: validate the body
-// Reads GITHUB_TOKEN and GITHUB_REPOSITORY (owner/name) from the environment. `check` and `landed`
-// call scripts/context.ts, which reads its own sign-in variables (see that file).
+//   node scripts/factory/dispatch.ts notify <issue>        on `needs-human`: post the issue to the team Slack channel
+//   node scripts/factory/dispatch.ts resume <issue>        on `needs-human` removed by a person: re-queue it with `check`
+// Reads GITHUB_TOKEN and GITHUB_REPOSITORY (owner/name) from the environment, and SLACK_WEBHOOK_URL for
+// `notify` and `landed` (unset or empty means no Slack post). `check`, `landed` and `resume` call scripts/context.ts,
+// which reads its own sign-in variables (see that file).
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
-const USAGE = 'usage: node dispatch.ts <check <issue> | landed <pr> | unblock <issue> | context-check <pr>>'
+const USAGE = 'usage: node dispatch.ts <check <issue> | landed <pr> | unblock <issue> | context-check <pr> | notify <issue> | resume <issue>>'
 const CONTEXT_TS = fileURLToPath(new URL('../context.ts', import.meta.url))
 const COMMENT_LIMIT = 60_000 // GitHub rejects comments over 65,536 characters
+const NEEDS_HUMAN = 'needs-human'
+const SLACK_QUOTE_LIMIT = 1_500 // characters of the newest comment quoted in Slack
 
 // Shapes -----------------------------------------------------------------------------------------
 
@@ -26,6 +32,19 @@ export type Issue = IssueRef & {
   blocking: IssueRef[]
 }
 export type Pull = { number: number; url: string; merged: boolean; base: string; body: string; mergeCommit: string | null }
+// The open pull request from `epic/<n>` into `main`. `nodeId` is what GraphQL mutations take.
+export type EpicPull = { number: number; url: string; draft: boolean; nodeId: string; head: string }
+// What the Slack post needs about an issue that was labeled: who added the label (null when GitHub
+// has no actor, such as a deleted account) and the newest comment, which usually holds the questions.
+export type LabelNotice = {
+  number: number
+  title: string
+  url: string
+  labeledBy: string | null
+  comment: { author: string | null; body: string; url: string } | null
+}
+// Who acted on an issue. `type` is GitHub's actor type (`User`, `Bot`, `Mannequin`, ...).
+export type Actor = { login: string; type: string }
 
 export interface GitHub {
   issue(number: number): Promise<Issue>
@@ -34,11 +53,30 @@ export interface GitHub {
   addLabels(number: number, labels: string[]): Promise<void>
   removeLabel(number: number, label: string): Promise<void>
   close(number: number): Promise<void>
+  labelNotice(number: number, label: string): Promise<LabelNotice>
+  // Who removed `label` most recently, or null when it was never removed or GitHub has no actor.
+  unlabeledBy(number: number, label: string): Promise<Actor | null>
+  // The open pull request whose head is `epic/<n>` and whose base is `main`, or null when none is open.
+  epicPull(epicNumber: number): Promise<EpicPull | null>
+  // Merges `main` into the pull request's branch when it is behind; false when it was already current.
+  updateBranch(pull: EpicPull): Promise<boolean>
+  markReady(pull: EpicPull): Promise<void>
+  // Starts a workflow_dispatch run of `.github/workflows/<file>` on `ref`. Dispatches made with GITHUB_TOKEN
+  // still start runs, unlike pushes, so this is how the epic branch's required checks run after update-branch.
+  dispatchWorkflow(file: string, ref: string, inputs?: Record<string, string>): Promise<void>
 }
 
 // Runs scripts/context.ts with these arguments and this standard input; resolves to its stdout.
 export type ContextLog = (args: string[], input?: string) => Promise<string>
-export type Deps = { github: GitHub; context: ContextLog; now?: () => Date; log?: (line: string) => void }
+export type Deps = {
+  github: GitHub
+  context: ContextLog
+  now?: () => Date
+  log?: (line: string) => void
+  // The Slack incoming webhook; unset or empty means `notify` skips. `fetch` is replaceable for tests.
+  slackWebhook?: string | undefined
+  fetch?: typeof fetch
+}
 
 // Pure rules -------------------------------------------------------------------------------------
 
@@ -71,6 +109,16 @@ export function readiness(issue: Issue): { ready: true } | { ready: false; reaso
   return { ready: true }
 }
 
+// Why `resume` should leave this issue alone, or null when a person removed `needs-human` from an open ticket.
+// An unknown actor (a deleted account) is skipped too: only a removal known to be a person's resumes.
+export function resumeSkipReason(issue: Issue, removedBy: Actor | null): string | null {
+  if (issue.labels.includes('epic')) return 'it is an epic'
+  if (issue.state !== 'OPEN') return 'it is closed'
+  if (issue.labels.includes(NEEDS_HUMAN)) return `it has ${NEEDS_HUMAN} again`
+  if (removedBy?.type !== 'User') return `${NEEDS_HUMAN} was removed by ${removedBy ? `${removedBy.type} ${removedBy.login}` : 'an unknown actor'}, not a person`
+  return null
+}
+
 // The ticket id at the start of an issue title ("T-02 Domain package" -> "T-02"), used as the
 // context log's topic.
 export function ticketId(title: string): string | null {
@@ -82,6 +130,14 @@ export function ticketNumber(body: string): number {
   const found = new Set([...body.matchAll(/^\s*Ticket:\s*#(\d+)\b/gim)].map((m) => Number(m[1])))
   if (found.size !== 1) throw new Error(`expected one "Ticket: #<n>" line in the pull request body, found ${found.size}`)
   return [...found][0] as number
+}
+
+// Work after a ticket closes needs a ticket of its own, so the epic's sub-issue list shows it.
+export function closedTicketError(ticket: IssueRef): string {
+  return (
+    `Ticket #${ticket.number} (${ticket.title}) is already closed, so this pull request would not show on its epic. ` +
+    `Open a follow-up ticket as a sub-issue of the same epic, blocked by #${ticket.number}, and put its number on the "Ticket:" line.`
+  )
 }
 
 // Topics whose context a ticket should see: its blockers, then the epic's other tickets.
@@ -122,6 +178,50 @@ export function contextComment(sections: { topic: string; relation: string; outp
   return body
 }
 
+// Ticket text made safe for Slack mrkdwn: `<!...>` commands (`<!channel>`, `<!subteam^...>`) and
+// `@channel`, `@here` and `@everyone` are removed, repeatedly so pieces can't rejoin into a new one,
+// then `&`, `<` and `>` are escaped as Slack requires, so nothing left can form a link or mention.
+export function slackText(raw: string): string {
+  let text = raw
+  for (let previous = ''; previous !== text; ) {
+    previous = text
+    text = text.replace(/<![^>]*>/g, '').replace(/@(?:channel|here|everyone)\b/gi, '')
+  }
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+// The first `limit` characters (by code point, so an emoji isn't cut in half), marked when cut.
+export function trimmed(text: string, limit = SLACK_QUOTE_LIMIT): string {
+  const chars = [...text.trim()]
+  return chars.length <= limit ? chars.join('') : `${chars.slice(0, limit).join('').trimEnd()}…`
+}
+
+// The epic id at the start of an epic issue title ("E1 Foundation" -> "E1").
+export function epicId(title: string): string | null {
+  return /^(E\d+)\b/.exec(title.trim())?.[1] ?? null
+}
+
+// The Slack post for an epic pull request that is ready for a person to approve into main.
+export function epicReadyMessage(pull: EpicPull, epicTitle: string): string {
+  return `<!here> *<${pull.url}|${slackText(epicTitle)}>* is ready for approval into main`
+}
+
+// A bold title link, who added the label, then the newest comment as a quote block.
+export function slackMessage(notice: LabelNotice, label = NEEDS_HUMAN): string {
+  const lines = [
+    // Our own @here so the team sees it; ticket text can never add one (slackText strips them).
+    `<!here> *<${notice.url}|#${notice.number} ${slackText(notice.title)}>*`,
+    `\`${label}\` added by ${notice.labeledBy ? slackText(notice.labeledBy) : 'an unknown actor'}`,
+  ]
+  const howToResume = `Reply on the issue, then remove \`${label}\` to resume.`
+  if (!notice.comment) return [...lines, '_No comments on the issue yet._', howToResume].join('\n')
+  const author = notice.comment.author ? slackText(notice.comment.author) : 'an unknown author'
+  const quote = slackText(trimmed(notice.comment.body) || '(empty comment)')
+    .split('\n')
+    .map((line) => `> ${line}`)
+  return [...lines, `<${notice.comment.url}|Newest comment> by ${author}:`, ...quote, howToResume].join('\n')
+}
+
 // Commands ---------------------------------------------------------------------------------------
 
 export async function check(number: number, deps: Deps): Promise<'skipped' | 'ready' | 'blocked'> {
@@ -149,6 +249,24 @@ export async function check(number: number, deps: Deps): Promise<'skipped' | 're
   return 'ready'
 }
 
+// A person answered on the issue and removed `needs-human`, so the ticket goes back to the factory: a fresh
+// Foreman run reads the answer from the issue comments. Only a person's removal counts, because the
+// factory removes the label itself after successful reviews. `factory-ready` comes off first, since `check`
+// skips a ticket that has it and Warp starts the Foreman when the label is added again.
+export async function resume(number: number, deps: Deps): Promise<'skipped' | 'ready' | 'blocked'> {
+  const { github, log = console.log } = deps
+  const issue = await github.issue(number)
+  const skip = resumeSkipReason(issue, await github.unlabeledBy(number, NEEDS_HUMAN))
+  if (skip) {
+    log(`#${number}: skipped resume, ${skip}`)
+    return 'skipped'
+  }
+  await github.comment(number, `Resuming: a person answered and removed ${NEEDS_HUMAN}.`)
+  if (issue.labels.includes('factory-ready')) await github.removeLabel(number, 'factory-ready')
+  // In-process, because a label added with GITHUB_TOKEN starts no workflow; Warp's GitHub app still sees it.
+  return check(number, deps)
+}
+
 export async function landed(number: number, deps: Deps): Promise<void> {
   const { github, context, log = console.log } = deps
   const pr = await github.pull(number)
@@ -169,12 +287,71 @@ export async function landed(number: number, deps: Deps): Promise<void> {
     const message = err instanceof Error ? err.message : String(err)
     await github.addLabels(ticket, ['needs-human'])
     await github.comment(ticket, `Context ingestion failed for pull request #${number}, so dependent tickets were not dispatched.\n\n${fenced(message)}`)
+    // In-process, because a label added with GITHUB_TOKEN does not start the `notify` workflow job.
+    // A failed Slack post is logged rather than thrown, so it can't hide the ingestion error.
+    try {
+      await notify(ticket, deps)
+    } catch (notifyErr) {
+      log(`#${ticket}: Slack notification failed: ${notifyErr instanceof Error ? notifyErr.message : notifyErr}`)
+    }
     throw new Error(`ingestion failed for #${ticket}: ${message}`)
   }
   await github.close(ticket)
   log(`#${ticket}: closed by pull request #${number}`)
-  // In-process, because closing with GITHUB_TOKEN does not start the `issues: closed` workflow.
-  await unblock(ticket, deps)
+  try {
+    // In-process, because closing with GITHUB_TOKEN does not start the `issues: closed` workflow.
+    await unblock(ticket, deps)
+  } finally {
+    // Runs even when a re-check fails, since this ticket's merge is done either way. Never throws.
+    const epic = /^epic\/(\d+)$/.exec(pr.base)?.[1]
+    if (epic) await epicReady(Number(epic), deps)
+    else log(`pull request #${number}: base ${pr.base} is not epic/<n>; skipped the epic readiness check`)
+  }
+}
+
+// Once every ticket in the epic is closed, brings the epic pull request up to date with `main` (whose
+// ruleset requires it), dispatches its required checks on the new head, marks it ready for review,
+// comments and posts to Slack. A pull request that is
+// already ready was handled by an earlier run, so nothing is repeated. Failures are logged, not thrown:
+// the ticket has already merged and closed, and a person can mark the pull request ready by hand.
+export async function epicReady(
+  epicNumber: number,
+  deps: Deps,
+): Promise<'waiting' | 'no-pull' | 'already-ready' | 'ready' | 'failed'> {
+  const { github, log = console.log } = deps
+  try {
+    const epic = await github.issue(epicNumber)
+    const open = epic.subIssues.filter((s) => s.state !== 'CLOSED')
+    if (open.length) {
+      log(`epic #${epicNumber}: waiting on ${open.map((s) => `#${s.number}`).join(', ')}`)
+      return 'waiting'
+    }
+    const pull = await github.epicPull(epicNumber)
+    if (!pull) {
+      log(`epic #${epicNumber}: every ticket is closed, but no open pull request from epic/${epicNumber} into main`)
+      return 'no-pull'
+    }
+    if (!pull.draft) {
+      log(`epic #${epicNumber}: pull request #${pull.number} is already ready for review`)
+      return 'already-ready'
+    }
+    const updated = await github.updateBranch(pull)
+    // The required checks `check` (ci.yml) and `context-check` (factory.yml) must pass on the head commit.
+    // An update-branch push made with GITHUB_TOKEN starts neither, so both are dispatched on the branch.
+    // Dispatched even when the branch was already current: the head may still lack runs of its own.
+    await github.dispatchWorkflow('ci.yml', pull.head)
+    await github.dispatchWorkflow('factory.yml', pull.head, { pr: String(pull.number) })
+    await github.markReady(pull)
+    const name = epicId(epic.title) ?? `#${epicNumber}`
+    await github.comment(pull.number, `All tickets in ${name} have merged. Ready for human approval into main.`)
+    log(`epic #${epicNumber}: pull request #${pull.number} ${updated ? 'updated from main and ' : ''}marked ready for review`)
+    if ((await postSlack(deps, async () => epicReadyMessage(pull, epic.title))) === 'posted')
+      log(`epic #${epicNumber}: posted to Slack`)
+    return 'ready'
+  } catch (err) {
+    log(`epic #${epicNumber}: readiness step failed: ${err instanceof Error ? err.message : err}`)
+    return 'failed'
+  }
 }
 
 // Pull requests straight into main (setup work, epic roll-ups) are logged too, so their decisions and
@@ -228,8 +405,48 @@ export async function unblock(number: number, deps: Deps): Promise<void> {
 export async function contextCheck(number: number, deps: Deps): Promise<void> {
   const { github, context, log = console.log } = deps
   const pr = await github.pull(number)
-  if (pr.base.startsWith('epic/')) ticketNumber(pr.body) // `landed` needs it, so the gate fails before the merge rather than after
+  if (pr.base.startsWith('epic/')) {
+    const n = ticketNumber(pr.body) // `landed` needs it, so the gate fails before the merge rather than after
+    // A merged pull request's ticket is closed by `landed`, so only open ones are held to this.
+    if (!pr.merged) {
+      const ticket = await github.issue(n)
+      if (ticket.state === 'CLOSED') throw new Error(closedTicketError(ticket))
+    }
+  }
   log(await context(['check'], pr.body))
+}
+
+// The webhook URL inside whatever was pasted into the secret: people paste quotes, whitespace, or the
+// whole `curl ...` example Slack shows. Returns null when no Slack webhook URL is present.
+export function webhookUrl(secret: string | undefined): string | null {
+  return /https:\/\/hooks\.slack\.com\/services\/[A-Za-z0-9/_-]+/.exec(secret ?? '')?.[0] ?? null
+}
+
+// Posts to the team Slack channel. Skips, without failing, when no webhook is set; `text` is only
+// built once a webhook is known, so a skip reads nothing from GitHub. The webhook URL is a secret, so
+// it never appears in a log line or an error message.
+async function postSlack(deps: Deps, text: () => Promise<string>): Promise<'skipped' | 'posted'> {
+  const { fetch: post = fetch, log = console.log } = deps
+  const slackWebhook = webhookUrl(deps.slackWebhook)
+  if (!slackWebhook) {
+    log(deps.slackWebhook ? 'SLACK_WEBHOOK_URL holds no hooks.slack.com URL; skipping' : 'Slack webhook not configured; skipping')
+    return 'skipped'
+  }
+  const response = await post(slackWebhook, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: await text(), unfurl_links: false, unfurl_media: false }),
+  })
+  if (!response.ok) throw new Error(`Slack webhook returned ${response.status}: ${(await response.text()).slice(0, 200)}`)
+  return 'posted'
+}
+
+// Posts a labeled issue to the team Slack channel.
+export async function notify(number: number, deps: Deps): Promise<'skipped' | 'posted'> {
+  const { github, log = console.log } = deps
+  const result = await postSlack(deps, async () => slackMessage(await github.labelNotice(number, NEEDS_HUMAN)))
+  if (result === 'posted') log(`#${number}: posted to Slack`)
+  return result
 }
 
 // GitHub over fetch ------------------------------------------------------------------------------
@@ -246,6 +463,26 @@ const ISSUE_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   }
 }
 fragment ref on Issue { number title state labels(first: 50) { nodes { name } } }`
+
+// The newest label events and the newest comment, so `last:` gets the right end of each list.
+const NOTICE_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      number title url
+      timelineItems(last: 50, itemTypes: [LABELED_EVENT]) { nodes { ... on LabeledEvent { actor { login } label { name } } } }
+      comments(last: 1) { nodes { author { login } body url } }
+    }
+  }
+}`
+
+// `__typename` of the actor is `User` for a person and `Bot` for an app such as Warp's or github-actions.
+const UNLABELED_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      timelineItems(last: 50, itemTypes: [UNLABELED_EVENT]) { nodes { ... on UnlabeledEvent { actor { __typename login } label { name } } } }
+    }
+  }
+}`
 
 type RawRef = { number: number; title: string; state: 'OPEN' | 'CLOSED'; labels: { nodes: { name: string }[] } }
 const ref = (raw: RawRef): IssueRef => ({ number: raw.number, title: raw.title, state: raw.state, labels: raw.labels.nodes.map((l) => l.name) })
@@ -312,6 +549,75 @@ export function restGitHub(token: string, repository: string): GitHub {
     async close(number) {
       await call('PATCH', `${issues}/${number}`, { state: 'closed', state_reason: 'completed' })
     },
+    async labelNotice(number, label) {
+      type Login = { login: string } | null
+      const result = (await call('POST', '/graphql', { query: NOTICE_QUERY, variables: { owner, name, number } })) as {
+        data?: {
+          repository: {
+            issue: {
+              number: number
+              title: string
+              url: string
+              timelineItems: { nodes: { actor: Login; label: { name: string } }[] }
+              comments: { nodes: { author: Login; body: string; url: string }[] }
+            } | null
+          }
+        }
+        errors?: { message: string }[]
+      }
+      if (result.errors?.length) throw new Error(`GraphQL: ${result.errors.map((e) => e.message).join('; ')}`)
+      const raw = result.data?.repository.issue
+      if (!raw) throw new Error(`issue #${number} not found`)
+      const event = raw.timelineItems.nodes.filter((e) => e.label?.name === label).at(-1)
+      const comment = raw.comments.nodes.at(-1)
+      return {
+        number: raw.number,
+        title: raw.title,
+        url: raw.url,
+        labeledBy: event?.actor?.login ?? null,
+        comment: comment ? { author: comment.author?.login ?? null, body: comment.body, url: comment.url } : null,
+      }
+    },
+    async unlabeledBy(number, label) {
+      const result = (await call('POST', '/graphql', { query: UNLABELED_QUERY, variables: { owner, name, number } })) as {
+        data?: {
+          repository: {
+            issue: { timelineItems: { nodes: { actor: { __typename: string; login: string } | null; label: { name: string } }[] } } | null
+          }
+        }
+        errors?: { message: string }[]
+      }
+      if (result.errors?.length) throw new Error(`GraphQL: ${result.errors.map((e) => e.message).join('; ')}`)
+      const raw = result.data?.repository.issue
+      if (!raw) throw new Error(`issue #${number} not found`)
+      const actor = raw.timelineItems.nodes.filter((e) => e.label?.name === label).at(-1)?.actor
+      return actor ? { login: actor.login, type: actor.__typename } : null
+    },
+    async epicPull(epicNumber) {
+      const head = encodeURIComponent(`${owner}:epic/${epicNumber}`)
+      const raw = (await call('GET', `/repos/${owner}/${name}/pulls?state=open&base=main&head=${head}`)) as {
+        number: number; html_url: string; draft: boolean; node_id: string; head: { ref: string }
+      }[]
+      const found = raw[0]
+      return found ? { number: found.number, url: found.html_url, draft: found.draft, nodeId: found.node_id, head: found.head.ref } : null
+    },
+    async updateBranch(pull) {
+      // How many commits `main` has that the epic branch lacks; the update call is only needed when any.
+      const compare = (await call('GET', `/repos/${owner}/${name}/compare/${pull.head}...main`)) as { ahead_by: number }
+      if (compare.ahead_by === 0) return false
+      await call('PUT', `/repos/${owner}/${name}/pulls/${pull.number}/update-branch`, {})
+      return true
+    },
+    async markReady(pull) {
+      const result = (await call('POST', '/graphql', {
+        query: 'mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { isDraft } } }',
+        variables: { id: pull.nodeId },
+      })) as { errors?: { message: string }[] }
+      if (result.errors?.length) throw new Error(`GraphQL: ${result.errors.map((e) => e.message).join('; ')}`)
+    },
+    async dispatchWorkflow(file, ref, inputs) {
+      await call('POST', `/repos/${owner}/${name}/actions/workflows/${encodeURIComponent(file)}/dispatches`, { ref, ...(inputs && { inputs }) })
+    },
   }
 }
 
@@ -336,11 +642,17 @@ if (import.meta.main) {
     if (!arg || !/^\d+$/.test(arg) || extra.length) throw new Error(USAGE)
     const token = process.env.GITHUB_TOKEN
     if (!token) throw new Error('GITHUB_TOKEN is not set')
-    const deps: Deps = { github: restGitHub(token, process.env.GITHUB_REPOSITORY ?? 'vibing-out/vbt'), context: runContext }
+    const deps: Deps = {
+      github: restGitHub(token, process.env.GITHUB_REPOSITORY ?? 'vibing-out/vbt'),
+      context: runContext,
+      slackWebhook: process.env.SLACK_WEBHOOK_URL, // an unset repository secret arrives as ''
+    }
     if (command === 'check') await check(Number(arg), deps)
     else if (command === 'landed') await landed(Number(arg), deps)
     else if (command === 'unblock') await unblock(Number(arg), deps)
     else if (command === 'context-check') await contextCheck(Number(arg), deps)
+    else if (command === 'notify') await notify(Number(arg), deps)
+    else if (command === 'resume') await resume(Number(arg), deps)
     else throw new Error(USAGE)
   } catch (err) {
     console.error(err instanceof Error ? err.message : err)

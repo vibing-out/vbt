@@ -176,12 +176,19 @@ describe("secrets stay out of the repo", () => {
     expect(ci).not.toMatch(/seed-demo-officials|seed:demo-officials/);
   });
 
-  test(".env.example lists the DEMO_* names with no values", () => {
+  test(".env.example lists the DEMO_* names and the bypass secret as commented entries with no values", () => {
     const example = readFileSync(join(SUPABASE_DIR, "..", ".env.example"), "utf8");
-    for (const prefix of ["DEMO_POLL_WORKER", "DEMO_COUNTY", "DEMO_STATE"]) {
-      for (const suffix of ["EMAIL", "PASSWORD", "TOTP_SECRET"]) {
-        expect(example).toMatch(new RegExp(`^${prefix}_${suffix}=$`, "m"));
-      }
+    const names = [
+      ...["DEMO_POLL_WORKER", "DEMO_COUNTY", "DEMO_STATE"].flatMap((prefix) =>
+        ["EMAIL", "PASSWORD", "TOTP_SECRET"].map((suffix) => `${prefix}_${suffix}`),
+      ),
+      "VERCEL_AUTOMATION_BYPASS_SECRET",
+    ];
+    for (const name of names) {
+      // Listed, commented and empty, like PLAYWRIGHT_BASE_URL...
+      expect(example).toMatch(new RegExp(`^#\\s+${name}=$`, "m"));
+      // ...so the parse in scripts/doctor.mjs (^\s*NAME\s*=) does not make it required in .env.local.
+      expect(example).not.toMatch(new RegExp(`^\\s*${name}\\s*=`, "m"));
     }
   });
 

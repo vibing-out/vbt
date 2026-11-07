@@ -1,0 +1,76 @@
+# Works one ticket from triage to a merged pull request in its epic branch with scripts/factory/build.ts,
+# Claude Code (Opus) on the team's subscription token doing the work. It replaces the Warp Foreman's
+# per-ticket loop. Not wired in yet: it runs only when started by hand (Actions -> Build ticket -> Run
+# workflow, or `gh workflow run build.yml -f issue=<n>`). Cutting over means dispatch.ts `check` starting it.
+#
+# Repository secrets required:
+#   CLAUDE_CODE_OAUTH_TOKEN  - from `claude setup-token` on the account whose Claude plan pays
+#   CONTEXT_SUPABASE_URL, CONTEXT_SUPABASE_PUBLISHABLE_KEY, CONTEXT_EMAIL, CONTEXT_PASSWORD (for `landed`)
+# Optional: SLACK_WEBHOOK_URL, for needs-human alerts.
+#
+# Safety: only the issue number reaches `run:`, through env; ticket text is read by the script from the API
+# and passed to Claude as data. The job checks out the default branch, so a ticket can't change the script
+# that works it; the ticket's code lives in a separate worktree. No API key is set, so Claude Code can only
+# sign in with the subscription token.
+
+name: Build ticket
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: Ticket issue number (must carry factory-ready)
+        required: true
+        type: number
+      shadow:
+        description: Trial run on a ticket without factory-ready (one Warp isn't working)
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: write
+  checks: read
+
+# One run per ticket. The cap of two tickets at a time across runs is in build.ts (hasSlot).
+concurrency:
+  group: build-${{ inputs.issue }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: npm install -g @anthropic-ai/claude-code
+      - run: |
+          git config --global user.name "vbt-factory[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ inputs.issue }}
+          SHADOW: ${{ inputs.shadow }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          SUPABASE_URL: ${{ secrets.CONTEXT_SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.CONTEXT_SUPABASE_PUBLISHABLE_KEY }}
+          CONTEXT_EMAIL: ${{ secrets.CONTEXT_EMAIL }}
+          CONTEXT_PASSWORD: ${{ secrets.CONTEXT_PASSWORD }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ "$SHADOW" = "true" ]; then node scripts/factory/build.ts "$ISSUE" --shadow
+          else node scripts/factory/build.ts "$ISSUE"; fi

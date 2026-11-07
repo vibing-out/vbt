@@ -6,7 +6,7 @@ import { type BallotStatus, isBallotStatus, isTerminal } from "./status.ts";
 
 export type BatchScope = "precinct" | "county";
 
-export const BATCH_SCOPES: readonly BatchScope[] = ["precinct", "county"];
+export const BATCH_SCOPES: readonly BatchScope[] = Object.freeze(["precinct", "county"]);
 
 export type TransitionRule = {
   readonly from: BallotStatus;

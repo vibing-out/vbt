@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   BALLOT_STATUSES,
+  BATCH_SCOPES,
   type BallotStatus,
   type BatchScope,
   CHALLENGEABLE_STATUSES,
@@ -55,6 +56,8 @@ describe("transition table", () => {
     expect(Object.isFrozen(TRANSITIONS)).toBe(true);
     expect(Object.isFrozen(TRANSITIONS[0])).toBe(true);
     expect(Object.isFrozen(CHALLENGEABLE_STATUSES)).toBe(true);
+    expect(Object.isFrozen(BATCH_SCOPES)).toBe(true);
+    expect(Object.isFrozen(BALLOT_STATUSES)).toBe(true);
   });
 
   test("findRule finds locked edges and nothing else", () => {

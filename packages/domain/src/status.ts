@@ -1,7 +1,7 @@
 // Ballot statuses, voter-facing labels and terminal flags.
 // Source: docs/locked-interfaces.md § Ballot status state machine.
 
-export const BALLOT_STATUSES = [
+export const BALLOT_STATUSES = Object.freeze([
   "CAST",
   "TALLIED_PRECINCT",
   "REPORTED_UNOFFICIAL",
@@ -9,7 +9,7 @@ export const BALLOT_STATUSES = [
   "CHALLENGED",
   "DISCARDED",
   "SPOILED",
-] as const;
+] as const);
 
 export type BallotStatus = (typeof BALLOT_STATUSES)[number];
 

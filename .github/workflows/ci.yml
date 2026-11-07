@@ -17,6 +17,10 @@ on:
   # Runs `check` on a branch's latest commit. dispatch.ts landed starts it on epic/<n> after updating the
   # branch from main with GITHUB_TOKEN, a push that starts no workflow, so the required check still runs.
   workflow_dispatch:
+  # The merge queue on main runs the required `check` on each queue entry (main plus the queued pull requests).
+  # `migrate` runs on push only, so a queue entry never touches the database.
+  merge_group:
+    types: [checks_requested]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

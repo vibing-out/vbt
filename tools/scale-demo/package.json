@@ -1,0 +1,27 @@
+{
+  "name": "@vbt/scale-demo",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "24.x" },
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing/fake-crypto.ts",
+    "./testing/db": "./src/testing/scratch-db.ts"
+  },
+  "scripts": {
+    "seed": "node src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vbt/domain": "workspace:*",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/pg": "8.23.1",
+    "@vbt/supabase": "workspace:*",
+    "typescript": "5.9.3",
+    "vitest": "5.1.0"
+  }
+}

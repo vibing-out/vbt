@@ -105,7 +105,8 @@ describe.each(FAULTS)("fault table: %s (acceptance: fails exactly the expected c
   });
 
   test("challenges only the affected ballots that can be challenged", () => {
-    const challengeable = fixture.ballots.filter((b) => expected.inScope(b) && b.status === "CAST");
+    const challengeStatuses = new Set(["CAST", "TALLIED_PRECINCT", "REPORTED_UNOFFICIAL"]);
+    const challengeable = fixture.ballots.filter((b) => expected.inScope(b) && challengeStatuses.has(b.status));
     expect(result.challenges.map((c) => c.ballotId)).toEqual(ids(challengeable));
     expect(result.challenges.every((c) => c.to === "CHALLENGED" && c.event_type === "MISMATCH_DETECTED")).toBe(true);
     if (expected.fails) expect(challengeable.length).toBeGreaterThan(0);

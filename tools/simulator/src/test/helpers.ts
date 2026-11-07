@@ -74,11 +74,11 @@ export function runChecks(t: Tree): Record<CheckId, string[]> {
   const failed: Record<CheckId, string[]> = { C1: [], C2: [], C3: [], C4: [] };
   for (const m of t.manifest.machines) {
     const logged = castBallotIds(t.logs.get(m.id) as CdfLogFile).length;
-    const cast = [...t.cvrs.values()].filter((c) => c.CastVoteRecordReport.CVR[0]?.CreatingDeviceId === m.id).length;
+    const cast = [...t.cvrs.values()].filter((c) => c.CVR[0]?.CreatingDeviceId === m.id).length;
     if (logged !== cast) failed.C1.push(m.id);
   }
   for (const [p, reported] of t.precincts) {
-    const cvrs = [...t.cvrs.values()].filter((c) => c.CastVoteRecordReport.CVR[0]?.BallotStyleUnitId === p);
+    const cvrs = [...t.cvrs.values()].filter((c) => c.CVR[0]?.BallotStyleUnitId === p);
     if (!sameCounts(tallyCvrs("precinct", p, cvrs), reported)) failed.C2.push(p);
   }
   if (!sameCounts(sumTotals("county-unofficial", t.manifest.countyId, [...t.precincts.values()]), t.county)) {

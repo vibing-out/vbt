@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { EVENT_IDS, castBallotIds } from "./formats/cdf-log.ts";
 import { cvrPath, machinePath, simulate } from "./generate.ts";
 import { listFiles, loadTree, runChecks, treeHashes, type Tree } from "./test/helpers.ts";
+import { nistSchemaErrors } from "./test/nist-schema.ts";
 import type { CdfLogFile, SimulateOptions } from "./types.ts";
 import { validateCdfLog } from "./validate/cdf.ts";
 import { validateCvrReport } from "./validate/cvr.ts";
@@ -86,19 +87,27 @@ describe("written CDF logs (AC2)", () => {
 });
 
 describe("written CVRs (AC3)", () => {
-  it("every *.cvr.json has the 1500-103 minimal report shape", async () => {
+  it("every *.cvr.json validates against the vendored NIST SP 1500-103 schema", async () => {
     const { tree } = await run("ac3", AC);
     expect(tree.cvrs.size).toBe(100);
+    // tree.cvrs holds JSON parsed from the files on disk, not builder output.
+    for (const file of tree.cvrs.values()) expect(nistSchemaErrors(file)).toEqual([]);
+  });
+
+  it("every *.cvr.json passes the semantic validator, one ballot per report", async () => {
+    const { tree } = await run("ac3-semantic", AC);
     for (const [id, file] of tree.cvrs) {
       expect(validateCvrReport(file)).toEqual([]);
-      const r = file.CastVoteRecordReport;
-      expect(r.Version).toBe("1.0.0");
-      expect(r.Election.length).toBeGreaterThan(0);
-      expect(r.GPUnit.length).toBeGreaterThan(0);
-      expect(r.ReportGeneratingDeviceIds.length).toBe(1);
-      expect(r.CVR).toHaveLength(1);
-      const cvr = r.CVR[0]!;
+      expect(file["@type"]).toBe("CVR.CastVoteRecordReport");
+      expect(file.Version).toBe("1.0.0");
+      expect(file.Election.length).toBeGreaterThan(0);
+      expect(file.GpUnit.length).toBeGreaterThan(0);
+      expect(file.ReportGeneratingDeviceIds.length).toBe(1);
+      expect(file.ReportingDevice.map((d) => d["@id"])).toEqual(file.ReportGeneratingDeviceIds);
+      expect(file.CVR).toHaveLength(1);
+      const cvr = file.CVR[0]!;
       expect(cvr.UniqueId).toBe(id);
+      expect(cvr.CreatingDeviceId).toBe(file.ReportingDevice[0]?.["@id"]);
       for (const k of ["CreatingDeviceId", "BallotStyleId", "BallotStyleUnitId", "CurrentSnapshotId"] as const) expect(cvr[k]).toBeTruthy();
       const snap = cvr.CVRSnapshot.find((s) => s["@id"] === cvr.CurrentSnapshotId);
       expect(snap?.CVRContest.length).toBe(2);

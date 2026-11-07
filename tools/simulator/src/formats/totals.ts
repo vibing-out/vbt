@@ -20,7 +20,7 @@ export function emptyTotals(scope: TotalsFile["scope"], scopeId: string): Totals
 export function tallyCvrs(scope: TotalsFile["scope"], scopeId: string, cvrs: readonly CvrFile[]): TotalsFile {
   const totals = emptyTotals(scope, scopeId);
   for (const file of cvrs) {
-    for (const ballot of file.CastVoteRecordReport.CVR) {
+    for (const ballot of file.CVR) {
       totals.ballotCount++;
       const snap = ballot.CVRSnapshot.find((s) => s["@id"] === ballot.CurrentSnapshotId);
       for (const contest of snap?.CVRContest ?? []) {

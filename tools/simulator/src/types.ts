@@ -35,45 +35,75 @@ export interface CdfLogFile {
 }
 
 // ---------- NIST SP 1500-103 cast vote record report (subset) ----------
+// Names and `@type` values follow the official JSON schema
+// (vendor/nist-sp-1500-103/cvr-minimal.schema.json).
 
-export interface CvrContestSelectionDef {
+export interface CvrCandidateSelectionDef {
   "@id": string;
-  "@type": "CandidateSelection" | "BallotMeasureSelection";
-  CandidateIds?: string[];
-  Selection?: string;
+  "@type": "CVR.CandidateSelection";
+  CandidateIds: string[];
 }
 
-export interface CvrContestDef {
+export interface CvrBallotMeasureSelectionDef {
   "@id": string;
-  "@type": "CandidateContest" | "BallotMeasureContest";
+  "@type": "CVR.BallotMeasureSelection";
+  Selection: string;
+}
+
+export type CvrContestSelectionDef = CvrCandidateSelectionDef | CvrBallotMeasureSelectionDef;
+
+export interface CvrCandidateContestDef {
+  "@id": string;
+  "@type": "CVR.CandidateContest";
   Name: string;
   VotesAllowed: number;
-  ContestSelection: CvrContestSelectionDef[];
+  ContestSelection: CvrCandidateSelectionDef[];
+}
+
+/** The schema has no VotesAllowed on BallotMeasureContest. */
+export interface CvrBallotMeasureContestDef {
+  "@id": string;
+  "@type": "CVR.BallotMeasureContest";
+  Name: string;
+  ContestSelection: CvrBallotMeasureSelectionDef[];
+}
+
+export type CvrContestDef = CvrCandidateContestDef | CvrBallotMeasureContestDef;
+
+export interface CvrCandidate {
+  "@id": string;
+  "@type": "CVR.Candidate";
+  Name: string;
 }
 
 export interface CvrSelectionPosition {
+  "@type": "CVR.SelectionPosition";
   HasIndication: "yes" | "no" | "unknown";
   IsAllocable: "yes" | "no" | "unknown";
   NumberVotes: number;
 }
 
 export interface CvrContestSelection {
+  "@type": "CVR.CVRContestSelection";
   ContestSelectionId: string;
   SelectionPosition: CvrSelectionPosition[];
 }
 
 export interface CvrContest {
+  "@type": "CVR.CVRContest";
   ContestId: string;
   CVRContestSelection: CvrContestSelection[];
 }
 
 export interface CvrSnapshot {
   "@id": string;
+  "@type": "CVR.CVRSnapshot";
   Type: "original" | "interpreted" | "modified";
   CVRContest: CvrContest[];
 }
 
 export interface CvrBallot {
+  "@type": "CVR.CVR";
   UniqueId: string;
   BallotStyleId: string;
   BallotStyleUnitId: string;
@@ -84,28 +114,59 @@ export interface CvrBallot {
   CVRSnapshot: CvrSnapshot[];
 }
 
+export type CvrReportingUnitType =
+  | "combined-precinct"
+  | "other"
+  | "polling-place"
+  | "precinct"
+  | "split-precinct"
+  | "vote-center";
+
+/** ReportingUnitType has no "county"; a county is Type "other" with OtherType "county". */
+export interface CvrGpUnit {
+  "@id": string;
+  "@type": "CVR.GpUnit";
+  Type: CvrReportingUnitType;
+  OtherType?: string;
+  Name: string;
+  ReportingDeviceIds?: string[];
+}
+
+export interface CvrReportingDevice {
+  "@id": string;
+  "@type": "CVR.ReportingDevice";
+  Application?: string;
+  Manufacturer?: string;
+  Model?: string;
+  SerialNumber?: string;
+}
+
+export interface CvrElection {
+  "@id": string;
+  "@type": "CVR.Election";
+  Name: string;
+  ElectionScopeId: string;
+  Candidate?: CvrCandidate[];
+  Contest: CvrContestDef[];
+}
+
 export interface CastVoteRecordReport {
-  "@type"?: "CastVoteRecordReport";
+  "@type": "CVR.CastVoteRecordReport";
   Version: "1.0.0";
   GeneratedDate: string;
   ReportType: Array<"originating-device-export">;
   ReportGeneratingDeviceIds: string[];
-  GPUnit: Array<{ "@id": string; Type: "precinct" | "other"; Name: string }>;
-  Party?: Array<{ "@id": string; Name: string; Abbreviation?: string }>;
-  Election: Array<{
-    "@id": string;
-    Name: string;
-    ElectionScopeId: string;
-    Candidate?: Array<{ "@id": string; Name: string }>;
-    Contest: CvrContestDef[];
-  }>;
+  ReportingDevice: CvrReportingDevice[];
+  GpUnit: CvrGpUnit[];
+  Election: CvrElection[];
   CVR: CvrBallot[];
 }
 
-/** Root object of a `<ballotId>.cvr.json` file. */
-export interface CvrFile {
-  CastVoteRecordReport: CastVoteRecordReport;
-}
+/**
+ * Root object of a `<ballotId>.cvr.json` file. Per the NIST schema
+ * (`$ref: CVR.CastVoteRecordReport`) the root is the report itself, unwrapped.
+ */
+export type CvrFile = CastVoteRecordReport;
 
 // ---------- Manifest and faults ----------
 

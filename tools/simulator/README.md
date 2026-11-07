@@ -40,7 +40,9 @@ Root `ElectionEventLog` → `Device[]` (one device, `Type: "scan-single"`, `Vers
 
 ### Cast vote records
 
-`CastVoteRecordReport` with `Version: "1.0.0"`, `ReportType: ["originating-device-export"]`, the fixture's `Election` and contests, `GPUnit` (precinct and county), and one `CVR` whose `CurrentSnapshotId` names an `original` snapshot with one indicated selection per contest. `CreatingDeviceId` is the machine id and `BallotStyleUnitId` the precinct id.
+The file root is the report itself (`"@type": "CVR.CastVoteRecordReport"`), unwrapped, as the NIST schema's root `$ref` requires. It has `Version: "1.0.0"`, `ReportType: ["originating-device-export"]`, one `ReportingDevice` (the machine; `ReportGeneratingDeviceIds` and `CVR.CreatingDeviceId` name it), `GpUnit` (the precinct with `Type: "precinct"`, and the county with `Type: "other", OtherType: "county"`, because the schema's ReportingUnitType has no county), the fixture's `Election` with its `Candidate`s and contests, and one `CVR`. That `CVR`'s `CurrentSnapshotId` names an `original` snapshot with one indicated selection per contest. `BallotStyleUnitId` is the precinct id. Every object carries its schema `@type` (`CVR.CVR`, `CVR.CVRSnapshot`, `CVR.CVRContest`, `CVR.CVRContestSelection`, `CVR.SelectionPosition`, `CVR.CandidateContest`, and so on).
+
+The tests check every written CVR against a trimmed copy of the official NIST schema with AJV. The schema and its provenance are in `vendor/nist-sp-1500-103/`. `validateCvrReport` adds the checks the schema can't make: that ids resolve, one ballot per file, and the county's `OtherType`.
 
 ### Totals (simulator-private)
 

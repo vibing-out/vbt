@@ -5,97 +5,120 @@ import {
   CONTESTS,
   COUNTY_ID,
   COUNTY_NAME,
+  DEVICE_TYPE,
+  DEVICE_VERSION,
   ELECTION_ID,
   ELECTION_NAME,
   precinctName,
 } from "../fixture.ts";
-import type { CvrContestDef, CvrFile, SimulatedBallot } from "../types.ts";
+import type { CvrCandidate, CvrContestDef, CvrFile, SimulatedBallot } from "../types.ts";
 
 export function snapshotId(ballotId: string): string {
   return `${ballotId}-original`;
 }
 
 function contestDefs(): CvrContestDef[] {
-  return CONTESTS.map((c) =>
+  return CONTESTS.map((c): CvrContestDef =>
     c.kind === "candidate"
       ? {
           "@id": c.id,
-          "@type": "CandidateContest",
+          "@type": "CVR.CandidateContest",
           Name: c.name,
           VotesAllowed: c.votesAllowed,
           ContestSelection: c.selections.map((s) => ({
             "@id": s.id,
-            "@type": "CandidateSelection",
+            "@type": "CVR.CandidateSelection",
             CandidateIds: [s.id],
           })),
         }
       : {
           "@id": c.id,
-          "@type": "BallotMeasureContest",
+          "@type": "CVR.BallotMeasureContest",
           Name: c.name,
-          VotesAllowed: c.votesAllowed,
           ContestSelection: c.selections.map((s) => ({
             "@id": s.id,
-            "@type": "BallotMeasureSelection",
+            "@type": "CVR.BallotMeasureSelection",
             Selection: s.name,
           })),
         },
   );
 }
 
-function candidates(): Array<{ "@id": string; Name: string }> {
+function candidates(): CvrCandidate[] {
   return CONTESTS.filter((c) => c.kind === "candidate").flatMap((c) =>
-    c.selections.map((s) => ({ "@id": s.id, Name: s.name })),
+    c.selections.map((s) => ({ "@id": s.id, "@type": "CVR.Candidate" as const, Name: s.name })),
   );
 }
 
+/** One NIST SP 1500-103 report holding one ballot; the file root is the report. */
 export function buildCvrReport(ballot: SimulatedBallot, generatedDate: string): CvrFile {
   const sid = snapshotId(ballot.ballotId);
   return {
-    CastVoteRecordReport: {
-      "@type": "CastVoteRecordReport",
-      Version: "1.0.0",
-      GeneratedDate: generatedDate,
-      ReportType: ["originating-device-export"],
-      ReportGeneratingDeviceIds: [ballot.machineId],
-      GPUnit: [
-        { "@id": ballot.precinctId, Type: "precinct", Name: precinctName(ballot.precinctId) },
-        { "@id": COUNTY_ID, Type: "other", Name: COUNTY_NAME },
-      ],
-      Election: [
-        {
-          "@id": ELECTION_ID,
-          Name: ELECTION_NAME,
-          ElectionScopeId: COUNTY_ID,
-          Candidate: candidates(),
-          Contest: contestDefs(),
-        },
-      ],
-      CVR: [
-        {
-          UniqueId: ballot.ballotId,
-          BallotStyleId: BALLOT_STYLE_ID,
-          BallotStyleUnitId: ballot.precinctId,
-          CreatingDeviceId: ballot.machineId,
-          ElectionId: ELECTION_ID,
-          CurrentSnapshotId: sid,
-          CVRSnapshot: [
-            {
-              "@id": sid,
-              Type: "original",
-              CVRContest: CONTESTS.map((c) => ({
-                ContestId: c.id,
-                CVRContestSelection: [
-                  {
-                    ContestSelectionId: ballot.selections[c.id] as string,
-                    SelectionPosition: [{ HasIndication: "yes", IsAllocable: "yes", NumberVotes: 1 }],
-                  },
-                ],
-              })),
-            },
-          ],
-        },
-      ],
-    },
+    "@type": "CVR.CastVoteRecordReport",
+    Version: "1.0.0",
+    GeneratedDate: generatedDate,
+    ReportType: ["originating-device-export"],
+    ReportGeneratingDeviceIds: [ballot.machineId],
+    ReportingDevice: [
+      {
+        "@id": ballot.machineId,
+        "@type": "CVR.ReportingDevice",
+        Application: DEVICE_VERSION,
+        Manufacturer: "VBT Simulator",
+        Model: DEVICE_TYPE,
+        SerialNumber: ballot.machineId,
+      },
+    ],
+    GpUnit: [
+      {
+        "@id": ballot.precinctId,
+        "@type": "CVR.GpUnit",
+        Type: "precinct",
+        Name: precinctName(ballot.precinctId),
+        ReportingDeviceIds: [ballot.machineId],
+      },
+      { "@id": COUNTY_ID, "@type": "CVR.GpUnit", Type: "other", OtherType: "county", Name: COUNTY_NAME },
+    ],
+    Election: [
+      {
+        "@id": ELECTION_ID,
+        "@type": "CVR.Election",
+        Name: ELECTION_NAME,
+        ElectionScopeId: COUNTY_ID,
+        Candidate: candidates(),
+        Contest: contestDefs(),
+      },
+    ],
+    CVR: [
+      {
+        "@type": "CVR.CVR",
+        UniqueId: ballot.ballotId,
+        BallotStyleId: BALLOT_STYLE_ID,
+        BallotStyleUnitId: ballot.precinctId,
+        CreatingDeviceId: ballot.machineId,
+        ElectionId: ELECTION_ID,
+        CurrentSnapshotId: sid,
+        CVRSnapshot: [
+          {
+            "@id": sid,
+            "@type": "CVR.CVRSnapshot",
+            Type: "original",
+            CVRContest: CONTESTS.map((c) => ({
+              "@type": "CVR.CVRContest" as const,
+              ContestId: c.id,
+              CVRContestSelection: [
+                {
+                  "@type": "CVR.CVRContestSelection" as const,
+                  ContestSelectionId: ballot.selections[c.id] as string,
+                  SelectionPosition: [
+                    { "@type": "CVR.SelectionPosition" as const, HasIndication: "yes" as const, IsAllocable: "yes" as const, NumberVotes: 1 },
+                  ],
+                },
+              ],
+            })),
+          },
+        ],
+      },
+    ],
   };
 }

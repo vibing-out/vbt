@@ -38,7 +38,13 @@ export type Issue = IssueRef & {
   blockedBy: Blocker[]
   blocking: IssueRef[]
 }
-export type Pull = { number: number; url: string; merged: boolean; base: string; body: string; mergeCommit: string | null }
+export type Pull = { number: number; url: string; author: string; merged: boolean; base: string; body: string; mergeCommit: string | null }
+
+// Dependabot writes its own descriptions and cannot add a `context-log` block, so its pull requests are
+// exempt, but only while the body has no block: a block that is present is still validated.
+export function exemptFromContextLog(pr: Pull): boolean {
+  return pr.author === 'dependabot[bot]' && !/^```context-log\b/m.test(pr.body)
+}
 // The open pull request from `epic/<n>` into `main`. `nodeId` is what GraphQL mutations take.
 export type EpicPull = { number: number; url: string; draft: boolean; nodeId: string; head: string }
 // What the Slack post needs about an issue that was labeled: who added the label (null when GitHub
@@ -498,6 +504,10 @@ export async function epicReady(
 // Nothing is closed or unblocked here: an epic's issue closes by hand or by "Closes" when it merges.
 async function landedOnMain(pr: Pull, number: number, deps: Deps): Promise<void> {
   const { github, context, log = console.log } = deps
+  if (exemptFromContextLog(pr)) {
+    log(`pull request #${number}: opened by dependabot[bot] with no context-log block, so nothing to ingest`)
+    return
+  }
   let topic = 'setup'
   try {
     topic = ticketId((await github.issue(ticketNumber(pr.body))).title) ?? 'setup'
@@ -569,6 +579,10 @@ export async function contextCheck(number: number, deps: Deps): Promise<void> {
       const ticket = await github.issue(n)
       if (ticket.state === 'CLOSED') throw new Error(closedTicketError(ticket))
     }
+  }
+  if (exemptFromContextLog(pr)) {
+    log(`pull request #${number}: opened by dependabot[bot] with no context-log block, so there is nothing to check`)
+    return
   }
   log(await context(['check'], pr.body))
 }
@@ -715,9 +729,9 @@ export function restGitHub(
     },
     async pull(number) {
       const raw = (await call('GET', `/repos/${owner}/${name}/pulls/${number}`)) as {
-        html_url: string; merged: boolean; base: { ref: string }; body: string | null; merge_commit_sha: string | null
+        html_url: string; user: { login: string } | null; merged: boolean; base: { ref: string }; body: string | null; merge_commit_sha: string | null
       }
-      return { number, url: raw.html_url, merged: raw.merged, base: raw.base.ref, body: raw.body ?? '', mergeCommit: raw.merge_commit_sha }
+      return { number, url: raw.html_url, author: raw.user?.login ?? '', merged: raw.merged, base: raw.base.ref, body: raw.body ?? '', mergeCommit: raw.merge_commit_sha }
     },
     async comment(number, body) {
       await call('POST', `${issues}/${number}/comments`, { body })

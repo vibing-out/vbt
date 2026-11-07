@@ -472,6 +472,14 @@ describe('contextCheck', () => {
   it('fails an open epic pull request whose ticket is already closed, naming the follow-up ticket fix', async () => {
     await expect(run(ticket({ state: 'CLOSED' }), pull())).rejects.toThrow(/Ticket #12 \(T-04 Schema\) is already closed.*follow-up ticket.*blocked by #12/)
   })
+  it('fails an open epic pull request whose ticket is the epic itself, naming the sync ticket fix', async () => {
+    await expect(run(ticket({ labels: ['epic'] }), pull())).rejects.toThrow(
+      "Ticket #12 is an epic. Open a sync ticket (for example 'T-00<letter> Sync epic/<k> with main', a sub-issue of the epic) and name that instead.",
+    )
+  })
+  it('passes an open epic pull request whose ticket has other labels', async () => {
+    await expect(run(ticket({ labels: ['factory-ready', 'local'] }), pull())).resolves.toBeUndefined()
+  })
   it('passes a merged pull request, whose ticket `landed` closed', async () => {
     await expect(run(ticket({ state: 'CLOSED' }), pull({ merged: true }))).resolves.toBeUndefined()
   })

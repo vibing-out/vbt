@@ -9,6 +9,9 @@
 //   node scripts/factory/dispatch.ts resume <issue>        on `needs-human` removed by a person: re-queue it with `check`
 //   node scripts/factory/dispatch.ts followup <issue> <title>  by the Foreman, body on stdin: open a follow-up ticket
 //                                                          in the same epic, blocked by <issue>, and queue it
+//   node scripts/factory/dispatch.ts wait <issue> <blocker>  by the Foreman: record that <issue> waits on <blocker>
+//                                                          and re-queue it, so `check` holds it `blocked` and
+//                                                          `unblock` re-dispatches it when <blocker> closes
 //   node scripts/factory/dispatch.ts sync-check            on a push to main: open a sync ticket for each open epic
 //                                                          pull request that now conflicts with main
 // Reads GITHUB_TOKEN and GITHUB_REPOSITORY (owner/name) from the environment, and SLACK_WEBHOOK_URL for
@@ -19,7 +22,7 @@ import { text } from 'node:stream/consumers'
 import { fileURLToPath } from 'node:url'
 
 const USAGE =
-  'usage: node dispatch.ts <check <issue> | landed <pr> | unblock <issue> | context-check <pr> | notify <issue> | resume <issue> | followup <issue> <title> (body on stdin) | sync-check>'
+  'usage: node dispatch.ts <check <issue> | landed <pr> | unblock <issue> | context-check <pr> | notify <issue> | resume <issue> | followup <issue> <title> (body on stdin) | wait <issue> <blocker> | sync-check>'
 const CONTEXT_TS = fileURLToPath(new URL('../context.ts', import.meta.url))
 const COMMENT_LIMIT = 60_000 // GitHub rejects comments over 65,536 characters
 const NEEDS_HUMAN = 'needs-human'
@@ -80,6 +83,8 @@ export interface GitHub {
   dispatchWorkflow(file: string, ref: string, inputs?: Record<string, string>): Promise<void>
   // Opens an issue as a sub-issue of `epic`, blocked by `blockedBy` when given; resolves to its number.
   createSubIssue(input: { title: string; body: string; epic: number; blockedBy?: number }): Promise<number>
+  // Adds a blocked-by dependency: `number` is blocked by `blocker`.
+  addBlockedBy(number: number, blocker: number): Promise<void>
 }
 
 // Runs scripts/context.ts with these arguments and this standard input; resolves to its stdout.
@@ -585,6 +590,36 @@ export async function followup(number: number, title: string, body: string, deps
   return created
 }
 
+// Why `wait` must refuse, or null when it can record the dependency. A closed blocker means there is
+// nothing to wait for: the Foreman carries on in the same run.
+export function waitRefusal(issue: Issue, blocker: Issue): string | null {
+  if (issue.number === blocker.number) return `#${issue.number} cannot wait on itself`
+  if (issue.labels.includes('epic')) return `#${issue.number} is an epic`
+  if (issue.state !== 'OPEN') return `#${issue.number} is closed`
+  if (blocker.state !== 'OPEN') return `#${blocker.number} is already closed; carry on in this run`
+  return null
+}
+
+// The Foreman found that its ticket can't go on until another issue lands (a sync ticket, a ticket it
+// builds on). A Warp run that parks to wait is never woken, so the wait becomes GitHub state instead:
+// a blocked-by link, `factory-ready` removed, and `queued` removed and added again. The Foreman's token
+// is not GITHUB_TOKEN, so that label event starts the `dispatch-check` job, whose `check` labels the
+// ticket `blocked` (or dispatches it, if the blocker closed meanwhile). When the blocker closes,
+// `unblock` re-checks it and a fresh Foreman run starts on `factory-ready`.
+export async function wait(number: number, blockerNumber: number, deps: Deps): Promise<void> {
+  const { github, log = console.log } = deps
+  const issue = await github.issue(number)
+  const refusal = waitRefusal(issue, await github.issue(blockerNumber))
+  if (refusal) throw new Error(refusal)
+  if (issue.blockedBy.some((b) => b.number === blockerNumber)) log(`#${number}: already blocked by #${blockerNumber}`)
+  else await github.addBlockedBy(number, blockerNumber)
+  await github.comment(number, `Waiting on #${blockerNumber}. Dispatch re-queues this ticket when it closes, and a new Foreman run picks it up.`)
+  if (issue.labels.includes('factory-ready')) await github.removeLabel(number, 'factory-ready')
+  if (issue.labels.includes('queued')) await github.removeLabel(number, 'queued')
+  await github.addLabels(number, ['queued'])
+  log(`#${number}: waiting on #${blockerNumber}, re-queued`)
+}
+
 // The webhook URL inside whatever was pasted into the secret: people paste quotes, whitespace, or the
 // whole `curl ...` example Slack shows. Returns null when no Slack webhook URL is present.
 export function webhookUrl(secret: string | undefined): string | null {
@@ -677,6 +712,11 @@ export function restGitHub(
     return text ? JSON.parse(text) : null
   }
   const issues = `/repos/${owner}/${name}/issues`
+  // The dependency endpoint takes the blocker's issue id, not its number.
+  const addBlockedBy = async (number: number, blocker: number): Promise<void> => {
+    const found = (await call('GET', `${issues}/${blocker}`)) as { id: number }
+    await call('POST', `${issues}/${number}/dependencies/blocked_by`, { issue_id: found.id })
+  }
   return {
     async issue(number) {
       const result = (await call('POST', '/graphql', { query: ISSUE_QUERY, variables: { owner, name, number } })) as {
@@ -826,11 +866,10 @@ export function restGitHub(
       // The sub-issue and dependency endpoints take issue ids, not numbers.
       const created = (await call('POST', issues, { title, body })) as { id: number; number: number }
       await call('POST', `${issues}/${epic}/sub_issues`, { sub_issue_id: created.id })
-      if (blockedBy === undefined) return created.number
-      const blocker = (await call('GET', `${issues}/${blockedBy}`)) as { id: number }
-      await call('POST', `${issues}/${created.number}/dependencies/blocked_by`, { issue_id: blocker.id })
+      if (blockedBy !== undefined) await addBlockedBy(created.number, blockedBy)
       return created.number
     },
+    addBlockedBy,
   }
 }
 
@@ -852,8 +891,8 @@ export const runContext: ContextLog = (args, input) =>
 if (import.meta.main) {
   const [command, arg, ...extra] = process.argv.slice(2)
   try {
-    if (command === 'sync-check' ? arg !== undefined : !arg || !/^\d+$/.test(arg) || (extra.length && command !== 'followup'))
-      throw new Error(USAGE)
+    const extraOk = command === 'followup' || (command === 'wait' ? extra.length === 1 && /^\d+$/.test(extra[0] ?? '') : !extra.length)
+    if (command === 'sync-check' ? arg !== undefined : !arg || !/^\d+$/.test(arg) || !extraOk) throw new Error(USAGE)
     const token = process.env.GITHUB_TOKEN
     if (!token) throw new Error('GITHUB_TOKEN is not set')
     const deps: Deps = {
@@ -868,6 +907,7 @@ if (import.meta.main) {
     else if (command === 'notify') await notify(Number(arg), deps)
     else if (command === 'resume') await resume(Number(arg), deps)
     else if (command === 'sync-check') await syncCheck(deps)
+    else if (command === 'wait') await wait(Number(arg), Number(extra[0]), deps)
     else if (command === 'followup') await followup(Number(arg), extra.join(' '), await text(process.stdin), deps)
     else throw new Error(USAGE)
   } catch (err) {

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  check, contextCheck, isSyncTicket, syncCheck, syncTitle, contextComment, followup, followupId, ticketId, resume, resumeSkipReason, epicReady, epicReadyMessage, landed, notify, readiness, restGitHub, slackMessage, slackText, ticketNumber, trimmed, unblock, webhookUrl, refreshContext, refreshTargets,
+  check, contextCheck, isSyncTicket, syncCheck, syncTitle, contextComment, followup, followupId, ticketId, resume, resumeSkipReason, epicReady, epicReadyMessage, landed, notify, readiness, restGitHub, slackMessage, slackText, ticketNumber, trimmed, unblock, wait, waitRefusal, webhookUrl, refreshContext, refreshTargets,
   type Actor, type Blocker, type EpicPull, type GitHub, type Issue, type IssueRef, type LabelNotice, type Pull,
 } from './dispatch.ts'
 
@@ -101,6 +101,9 @@ function fakeGitHub(
       byNumber.set(50, created)
       parent?.subIssues.push(ref(50, title))
       return 50
+    },
+    async addBlockedBy(n, b) {
+      calls.push(`link #${n} blocked by #${b}`)
     },
   }
 }
@@ -494,6 +497,54 @@ describe('unblock', () => {
     const github = setup('OPEN')
     await unblock(2, deps(github))
     expect(github.calls).toEqual([])
+  })
+})
+
+describe('wait', () => {
+  // T-05 (#15) waits on its epic's sync ticket T-00a (#78), as on 2026-11-07.
+  const sync: Issue = { ...ref(78, 'T-00a Sync epic/2 with main', 'OPEN', ['queued', 'factory-ready']), parent: epic, subIssues: [], blockedBy: [], blocking: [] }
+  const t05 = (overrides: Partial<Issue> = {}): Issue => ticket({ number: 15, title: 'T-05 Ingest', labels: ['queued', 'factory-ready'], ...overrides })
+  const deps = (github: GitHub) => ({ github, context: async () => 'no entries', log: silent })
+
+  it('links the blocker, then drops factory-ready and re-adds queued so check holds the ticket blocked', async () => {
+    const github = fakeGitHub([t05(), sync])
+    await wait(15, 78, deps(github))
+    expect(github.calls).toEqual([
+      'link #15 blocked by #78',
+      'comment #15 Waiting on #78. Dispatch re-queues this ticket when it closes, and a new Foreman run picks it up.',
+      'label #15 -factory-ready',
+      'label #15 -queued',
+      'label #15 +queued',
+    ])
+  })
+  it('does not link a blocker twice', async () => {
+    const github = fakeGitHub([t05({ blockedBy: [blocker(78, 'T-00a Sync epic/2 with main')] }), sync])
+    await wait(15, 78, deps(github))
+    expect(github.calls[0]).toBe('comment #15 Waiting on #78. Dispatch re-queues this ticket when it closes, and a new Foreman run picks it up.')
+  })
+  it('adds queued even when the ticket lost it', async () => {
+    const github = fakeGitHub([t05({ labels: ['factory-ready'] }), sync])
+    await wait(15, 78, deps(github))
+    expect(github.calls.slice(-2)).toEqual(['label #15 -factory-ready', 'label #15 +queued'])
+  })
+  it('refuses a closed blocker, itself, an epic and a closed ticket, writing nothing', async () => {
+    const closedSync = { ...sync, state: 'CLOSED' as const }
+    expect(waitRefusal(t05(), closedSync)).toMatch(/already closed; carry on/)
+    expect(waitRefusal(t05(), t05())).toMatch(/itself/)
+    expect(waitRefusal(t05({ labels: ['epic'] }), sync)).toMatch(/epic/)
+    expect(waitRefusal(t05({ state: 'CLOSED' }), sync)).toMatch(/#15 is closed/)
+    expect(waitRefusal(t05(), sync)).toBeNull()
+    const github = fakeGitHub([t05(), closedSync])
+    await expect(wait(15, 78, deps(github))).rejects.toThrow(/already closed/)
+    expect(github.calls).toEqual([])
+  })
+  it('is re-dispatched by unblock once the blocker closes', async () => {
+    // The state after `wait` and the `check` its queued event started: blocked by #78, labeled blocked.
+    const waiting = t05({ labels: ['queued', 'blocked'], blockedBy: [blocker(78, 'T-00a Sync epic/2 with main', 'CLOSED')] })
+    const closedSync: Issue = { ...sync, state: 'CLOSED', blocking: [ref(15, 'T-05 Ingest', 'OPEN', ['queued', 'blocked'])] }
+    const github = fakeGitHub([waiting, closedSync])
+    await unblock(78, { ...deps(github), now: () => new Date('2026-11-07T19:08:00Z') })
+    expect(github.calls).toEqual(['context #15 ## Context from earlier tickets', 'label #15 +factory-ready', 'label #15 -blocked'])
   })
 })
 

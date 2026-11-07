@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
-  branchName, build, decisions, redacted, run, hasSlot, parseClaude, prBody, reviewVerdict, STAGES, verdict, withContract, withoutVerdict, MAX_REVIEW_ROUNDS,
+  afterFixes, branchName, build, decisions, redacted, run, hasSlot, parseClaude, prBody, reviewVerdict, STAGES, verdict, withContract, withoutVerdict, MAX_REVIEW_ROUNDS,
   type BuildDeps, type Exec, type Stage,
 } from './build.ts'
 import { check as checkReport } from './report.ts'
@@ -9,6 +9,8 @@ import { check as checkReport } from './report.ts'
 const EXAMPLE = readFileSync(new URL('./report.example.md', import.meta.url), 'utf8')
 // The example report with its first fixed finding reopened: an open unambiguous fix.
 const OPEN_FIX = EXAMPLE.replace('[high, fixed]', '[high, open]')
+// The example report with only its low-severity fix reopened.
+const LOW_FIX = EXAMPLE.replace('[low, fixed]', '[low, open]')
 import type { GitHub, Issue, IssueRef } from './dispatch.ts'
 
 const claudeJson = (result: string, models = ['claude-opus-5-5']): string =>
@@ -95,6 +97,21 @@ describe('prompts', () => {
   })
 })
 
+describe('afterFixes', () => {
+  const low = [{ severity: 'low' }]
+  const mixed = [{ severity: 'low' }, { severity: 'medium' }]
+  it.each([
+    [1, mixed, 'again'],
+    [2, low, 'final'],
+    [2, mixed, 'stop'],
+    [2, null, 'stop'], // a report that failed its check has no trustworthy severities
+    [3, low, 'merge-low'],
+    [3, mixed, 'stop'],
+  ] as const)('round %i with %j open goes to %s', (round, fixes, expected) => {
+    expect(afterFixes(round, fixes ? [...fixes] : null)).toBe(expected)
+  })
+})
+
 describe('reviewVerdict', () => {
   it('lets the checked report overrule a VERDICT line that says clean', () => {
     const report = checkReport(OPEN_FIX, 'review')
@@ -154,11 +171,13 @@ const ticket: Issue = {
 // Scripted world: Claude's answer per stage, every command recorded in order.
 function world(answers: Partial<Record<Stage, string[]>>, opts: { checksFail?: boolean; inFlight?: string; authFails?: boolean } = {}) {
   const calls: string[] = []
+  const inputs: string[] = [] // standard input of each command, such as pull request bodies
   const labels: string[] = []
   const queue = Object.fromEntries(Object.entries(answers).map(([k, v]) => [k, [...v]])) as Partial<Record<Stage, string[]>>
   const exec: Exec = async (command, args, options) => {
     const line = `${command} ${args.join(' ')}`
     calls.push(line)
+    if (options?.input) inputs.push(options.input)
     const done = (stdout = '') => ({ code: 0, stdout, stderr: '' })
     if (command === 'claude' && args.includes('Reply with exactly: OK')) return opts.authFails ? { code: 1, stdout: '', stderr: 'Invalid OAuth token sk-ant-oat01-abc' } : done(claudeJson('OK', ['claude-haiku-5-5']))
     if (command === 'claude' && args.includes('--continue')) return done(claudeJson('still not a report'))
@@ -198,7 +217,7 @@ function world(answers: Partial<Record<Stage, string[]>>, opts: { checksFail?: b
     sleep: async () => {},
     log: () => {},
   }
-  return { calls, labels, deps }
+  return { calls, labels, inputs, deps }
 }
 
 describe('build', () => {
@@ -290,6 +309,40 @@ describe('build', () => {
     expect(w.calls.filter((c) => c.startsWith('claude') && c.includes('Read,Grep,Glob,WebSearch') && !c.includes('--continue')).length).toBe(4) // triage, spec, 2 reviews
     expect(w.calls.some((c) => c.startsWith('gh pr merge'))).toBe(false)
     expect(w.labels).toEqual(['needs-human', 'needs-human'])
+  })
+
+  it('runs one final round when only low-severity fixes are open after the cap, then merges when it is clean', async () => {
+    const w = world({
+      triage: ['VERDICT: clean'], spec: ['VERDICT: clean'],
+      implement: ['a\nVERDICT: clean', 'b\nVERDICT: clean', 'c\nVERDICT: clean'],
+      review: [`${OPEN_FIX}\nVERDICT: fixes`, `${LOW_FIX}\nVERDICT: fixes`, `${EXAMPLE}\nVERDICT: clean`],
+    })
+    expect(await build(32, w.deps)).toBe('merged')
+    expect(w.calls.filter((c) => c.startsWith('claude') && c.includes('Read,Edit,Write')).length).toBe(3)
+    expect(w.calls).toContain('gh pr merge 34 --squash')
+    expect(w.labels).toEqual([])
+  })
+
+  it('merges when the final round leaves only low-severity fixes, and lists them in the Review log', async () => {
+    const w = world({
+      triage: ['VERDICT: clean'], spec: ['VERDICT: clean'],
+      implement: ['a\nVERDICT: clean', 'b\nVERDICT: clean', 'c\nVERDICT: clean'],
+      review: [`${LOW_FIX}\nVERDICT: fixes`, `${LOW_FIX}\nVERDICT: fixes`, `${LOW_FIX}\nVERDICT: fixes`],
+    })
+    expect(await build(32, w.deps)).toBe('merged')
+    const finalEdit = w.inputs.filter((i) => i.includes('## Review log')).at(-1)!
+    expect(finalEdit).toContain('Low-severity fixes left open after the final round')
+    expect(finalEdit).toContain('The context-log block was missing resolutions.')
+  })
+
+  it('stops for a person when the final round still has a medium or high fix open', async () => {
+    const w = world({
+      triage: ['VERDICT: clean'], spec: ['VERDICT: clean'],
+      implement: ['a\nVERDICT: clean', 'b\nVERDICT: clean', 'c\nVERDICT: clean'],
+      review: [`${LOW_FIX}\nVERDICT: fixes`, `${LOW_FIX}\nVERDICT: fixes`, `${OPEN_FIX}\nVERDICT: fixes`],
+    })
+    expect(await build(32, w.deps)).toBe('needs-human')
+    expect(w.calls.some((c) => c.startsWith('gh pr merge'))).toBe(false)
   })
 
   it('stops for a person when checks still fail after two implement attempts', async () => {

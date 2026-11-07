@@ -12,6 +12,7 @@ export {
   type BatchTransitionInput,
   CHALLENGEABLE_STATUSES,
   findRule,
+  PUBLISHED_STAGES,
   TRANSITIONS,
   type TransitionErrorCode,
   type TransitionInput,
@@ -30,3 +31,5 @@ export {
   officialMayActOn,
   toOfficialGrant,
 } from "./official.ts";
+
+export { FALLBACK_RANK, orderByChain, type PublicEvent } from "./timeline.ts";

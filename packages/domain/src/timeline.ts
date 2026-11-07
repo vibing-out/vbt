@@ -2,9 +2,10 @@
 // starting from the event with prev_hash = null (CAST). The chain is the ballot's own history, not a
 // timestamp, so nothing here reveals order across ballots (locked principle 5). No hashing happens
 // here: verifying the chain belongs to packages/events and the verifier (T-15).
-import { type BallotStatus, isBallotStatus } from "@vbt/domain";
 
-/** The columns the tracker reads from ballot_event_public. */
+import { type BallotStatus, isBallotStatus } from "./status.ts";
+
+/** One public ballot event, as the tracker reads it from ballot_event_public. */
 export interface PublicEvent {
   event_type: string;
   from_status: string | null;
@@ -15,9 +16,11 @@ export interface PublicEvent {
   hash: string;
 }
 
-// Fallback display order when the chain can't be followed (missing root, fork, gap or cycle). The view
-// returns rows in hash order, which is not temporal, so a stable sort on this rank leaks nothing.
-const FALLBACK_RANK: Readonly<Record<BallotStatus, number>> = {
+/**
+ * Fallback display order when the chain can't be followed (missing root, fork, gap or cycle). Rows
+ * arrive in hash order, which is not temporal, so a stable sort on this rank leaks nothing.
+ */
+export const FALLBACK_RANK: Readonly<Record<BallotStatus, number>> = Object.freeze({
   CAST: 0,
   SPOILED: 1,
   TALLIED_PRECINCT: 2,
@@ -25,7 +28,7 @@ const FALLBACK_RANK: Readonly<Record<BallotStatus, number>> = {
   CERTIFIED: 4,
   CHALLENGED: 5,
   DISCARDED: 6,
-};
+});
 
 function eventRank(event: PublicEvent): number {
   if (event.event_type === "CAST") return -1;

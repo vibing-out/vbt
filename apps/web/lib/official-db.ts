@@ -3,7 +3,7 @@ import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 // Server-only access to the private ballot tables for the official tools (T-09). Every call is an rpc to a
-// public.official_* function (supabase/migrations/20261107240100_t09_official_functions.sql) that only
+// public.official_* function (supabase/migrations/20261107225100_t09_official_functions.sql) that only
 // service_role may execute, so this module needs SUPABASE_SECRET_KEY. Callers use it only after
 // requireRole has passed. Each write is one rpc, which PostgREST runs in one transaction.
 

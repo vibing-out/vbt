@@ -57,6 +57,29 @@ describe("checkChoices", () => {
     expect(checkChoices(MANIFEST, "broken", {})).toMatchObject({ code: "UNKNOWN_CONTEST", contestId: "governor" });
   });
 
+  test("rejects a ballot style that lists a contest more than once", () => {
+    const manifest: Manifest = {
+      contests: MANIFEST.contests,
+      ballot_styles: [{ id: "repeat", contest_ids: ["us-senate", "school-board", "us-senate"] }],
+    };
+    expect(checkChoices(manifest, "repeat", {})).toEqual({
+      code: "DUPLICATE_CONTEST",
+      contestId: "us-senate",
+      message: "Ballot style repeat lists contest us-senate more than once",
+    });
+    // Valid choices don't hide it, and summarizeChoices refuses the style too.
+    expect(checkChoices(manifest, "repeat", { "us-senate": ["sen-oakley"] })).toMatchObject({ code: "DUPLICATE_CONTEST" });
+    expect(summarizeChoices(manifest, "repeat", {})).toMatchObject({ ok: false, code: "DUPLICATE_CONTEST" });
+  });
+
+  test("reports an unknown contest on a style before a repeated one", () => {
+    const manifest: Manifest = {
+      contests: MANIFEST.contests,
+      ballot_styles: [{ id: "both", contest_ids: ["governor", "mayor", "mayor"] }],
+    };
+    expect(checkChoices(manifest, "both", {})).toMatchObject({ code: "UNKNOWN_CONTEST", contestId: "governor" });
+  });
+
   test("rejects a contest that is not on the style, whether or not the manifest knows it", () => {
     expect(checkChoices(MANIFEST, "county", { mayor: ["m-ruiz"] })).toEqual({
       code: "CONTEST_NOT_ON_STYLE",

@@ -33,6 +33,7 @@ export type BallotChoices = Readonly<Record<string, readonly string[]>>;
 export type ChoiceErrorCode =
   | "UNKNOWN_BALLOT_STYLE"
   | "UNKNOWN_CONTEST"
+  | "DUPLICATE_CONTEST"
   | "CONTEST_NOT_ON_STYLE"
   | "DUPLICATE_SELECTION"
   | "OVERVOTE"
@@ -64,6 +65,7 @@ export type ChoiceSummaryResult =
  * contest, in the order the choices list them:
  *
  * - the ballot style is in the manifest, and every contest it lists is too;
+ * - the ballot style lists each contest once;
  * - each contest chosen is on the ballot style;
  * - no selection is chosen twice in a contest;
  * - no more than vote_for selections are chosen (an overvote is rejected; fewer is an undervote);
@@ -73,10 +75,19 @@ export function checkChoices(manifest: Manifest, styleId: string, choices: Ballo
   const style = manifest.ballot_styles.find((s) => s.id === styleId);
   if (!style) return { code: "UNKNOWN_BALLOT_STYLE", message: `Unknown ballot style ${styleId}` };
 
+  const listed = new Set<string>();
   for (const contestId of style.contest_ids) {
     if (!manifest.contests.some((c) => c.id === contestId)) {
       return { code: "UNKNOWN_CONTEST", contestId, message: `Unknown contest ${contestId} on ballot style ${styleId}` };
     }
+    if (listed.has(contestId)) {
+      return {
+        code: "DUPLICATE_CONTEST",
+        contestId,
+        message: `Ballot style ${styleId} lists contest ${contestId} more than once`,
+      };
+    }
+    listed.add(contestId);
   }
 
   for (const [contestId, picked] of Object.entries(choices)) {

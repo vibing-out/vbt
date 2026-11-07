@@ -61,6 +61,24 @@ describe("parseInput", () => {
     expect(() => parseInput(withBallot((b) => (b.tracking_code = "A".repeat(65))))).toThrow(/at most 64/);
   });
 
+  it("rejects a ballot style that lists a contest twice, even if no ballot uses that style", () => {
+    const raw = exampleRaw() as Raw;
+    const style = raw.manifest.ballot_styles[0];
+    style.contest_ids.push(style.contest_ids[0]);
+    expect(() => parseInput(raw)).toThrow(new RegExp(`ballot_styles\\[0\\] lists a contest twice \\(${style.contest_ids[0]}\\)`));
+
+    const unused = exampleRaw() as Raw;
+    const first = unused.manifest.contests[0].id;
+    unused.manifest.ballot_styles.push({ id: "unused-style", contest_ids: [first, first] });
+    expect(() => parseInput(unused)).toThrow(/lists a contest twice/);
+  });
+
+  it("still reports an unknown contest on a ballot style", () => {
+    const raw = exampleRaw() as Raw;
+    raw.manifest.ballot_styles[0].contest_ids.push("governor");
+    expect(() => parseInput(raw)).toThrow(/lists unknown contest governor/);
+  });
+
   it("rejects duplicate ids in the manifest", () => {
     const raw = exampleRaw() as Raw;
     raw.manifest.contests.push(raw.manifest.contests[0]);

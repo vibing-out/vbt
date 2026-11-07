@@ -4,8 +4,9 @@
 //
 // Unknown fields are rejected, so a time of casting or a voter's details can't ride along unnoticed.
 
-// The election rules (what a ballot style holds, vote_for, repeated or unknown selections) live in
-// @vbt/domain; this file only checks the file's shape and reports where a problem is.
+// The election rules (what a ballot style holds, a contest listed twice on a style, vote_for, repeated
+// or unknown selections) live in @vbt/domain; this file only checks the file's shape and reports where
+// a problem is.
 
 import { type ChoiceProblem, checkChoices, type Contest, type Manifest } from "@vbt/domain";
 import { parseCalendarDate } from "./dates.ts";
@@ -121,6 +122,12 @@ function choiceError(problem: ChoiceProblem, path: string, styleId: string): str
   }
 }
 
+/** Puts the input path in front of a domain problem with a ballot style itself. */
+function styleError(problem: ChoiceProblem, path: string): string {
+  if (problem.code === "DUPLICATE_CONTEST") return `${path} lists a contest twice (${problem.contestId ?? ""})`;
+  return `${path}: ${problem.message}`;
+}
+
 /** Parses and validates the generator input. Throws with the path of the first problem. */
 export function parseInput(raw: unknown): ReceiptsInput {
   const root = object(raw, "input", ["version", "election", "precincts", "manifest", "ballots"]);
@@ -146,12 +153,16 @@ export function parseInput(raw: unknown): ReceiptsInput {
   const ballotStyles = array(m.ballot_styles, "manifest.ballot_styles").map((s, i) => {
     const path = `manifest.ballot_styles[${i}]`;
     const so = object(s, path, ["id", "contest_ids"]);
+    const id = text(so.id, `${path}.id`);
     const contestIds = array(so.contest_ids, `${path}.contest_ids`).map((c, j) => text(c, `${path}.contest_ids[${j}]`));
-    for (const id of contestIds) {
-      if (!contestById.has(id)) throw new Error(`${path} lists unknown contest ${id}`);
+    for (const contestId of contestIds) {
+      if (!contestById.has(contestId)) throw new Error(`${path} lists unknown contest ${contestId}`);
     }
-    if (new Set(contestIds).size !== contestIds.length) throw new Error(`${path} lists a contest twice`);
-    return { id: text(so.id, `${path}.id`), contest_ids: contestIds };
+    const style = { id, contest_ids: contestIds };
+    // Checked on its own, so a style with a repeated contest is refused even if no ballot uses it.
+    const problem = checkChoices({ contests, ballot_styles: [style] }, id, {});
+    if (problem) throw new Error(styleError(problem, path));
+    return style;
   });
   const styleById = uniqueIds(ballotStyles, "manifest.ballot_styles");
   const manifest: Manifest = { contests, ballot_styles: ballotStyles };

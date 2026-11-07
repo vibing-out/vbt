@@ -107,6 +107,20 @@ describe("integrity check lines", () => {
     data.stages[0]!.recordUrl = "/api/record/precinct/TALLIED_PRECINCT";
     expect(render(data)).toContain('href="/api/record/precinct/TALLIED_PRECINCT"');
   });
+
+  test("T-08b AC1: each published stage links to its record on /record", () => {
+    const data = ballot(PATHS.CERTIFIED);
+    for (const s of data.stages) s.recordUrl = `/record#record-${s.scopeId}-${s.stage}`;
+    const html = render(data);
+    for (const href of [
+      "/record#record-18097-001-TALLIED_PRECINCT",
+      "/record#record-18097-REPORTED_UNOFFICIAL",
+      "/record#record-18097-CERTIFIED",
+    ]) {
+      expect(html).toContain(`href="${href}"`);
+    }
+    expect(html.match(/View the published record/g)).toHaveLength(3);
+  });
 });
 
 test("AC4: the page never shows a time of day", () => {

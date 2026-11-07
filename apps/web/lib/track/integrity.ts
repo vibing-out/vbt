@@ -3,9 +3,10 @@
 // (CLAUDE.md "crypto only in packages/crypto"; locked-interfaces § Cryptography).
 //
 // TODO(T-21): when packages/crypto and the stage-record leaf code land, replace
-// `pendingIntegrityChecker` and `pendingRecordReader` in `defaultIntegrity` below with real
-// implementations. Until then every stage reports "unavailable", never a fake "passed".
+// `pendingIntegrityChecker` in `defaultIntegrity` below with a real implementation. Until then every
+// stage reports "unavailable", never a fake "passed".
 import type { BallotStatus } from "@vbt/domain";
+import { recordPageUrl } from "../record/links";
 import type { IntegrityCheck } from "./types";
 
 /** The public parts of a published stage record a check runs against. */
@@ -37,14 +38,25 @@ export const pendingIntegrityChecker: IntegrityChecker = {
   },
 };
 
-/** Stub until GET /api/record/{scope}/{stage} exists: no link rather than a broken one. */
+/** No link rather than a broken one (kept for callers that have no published record to point at). */
 export const pendingRecordReader: RecordReader = {
   recordUrl() {
     return null;
   },
 };
 
-export const defaultIntegrity = { checker: pendingIntegrityChecker, records: pendingRecordReader } as const;
+/**
+ * Links each stage to its entry on /record (T-08b), which shows the Merkle root, totals and signature
+ * and offers the exact GET /api/record/{scope}/{stage} JSON. Null for a scope id or stage that has
+ * no record URL.
+ */
+export const publishedRecordReader: RecordReader = {
+  recordUrl(record) {
+    return recordPageUrl(record.scopeId, record.stage);
+  },
+};
+
+export const defaultIntegrity = { checker: pendingIntegrityChecker, records: publishedRecordReader } as const;
 
 /** Runs a checker, turning a throw or a malformed result into "unavailable" (never "passed"). */
 export async function safeCheck(

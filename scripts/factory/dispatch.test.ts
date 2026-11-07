@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  check, contextComment, epicReady, epicReadyMessage, landed, notify, readiness, slackMessage, slackText, ticketNumber, trimmed, unblock, webhookUrl,
+  check, contextComment, epicReady, epicReadyMessage, landed, notify, readiness, restGitHub, slackMessage, slackText, ticketNumber, trimmed, unblock, webhookUrl,
   type Blocker, type EpicPull, type GitHub, type Issue, type IssueRef, type LabelNotice, type Pull,
 } from './dispatch.ts'
 
@@ -66,6 +66,9 @@ function fakeGitHub(issues: Issue[], pull?: Pull, notice?: LabelNotice, epicPull
     async markReady(p) {
       calls.push(`ready #${p.number}`)
       if (epicPull) epicPull.draft = false
+    },
+    async dispatchWorkflow(file, ref, inputs) {
+      calls.push(`dispatch ${file} on ${ref}${inputs ? ` ${JSON.stringify(inputs)}` : ''}`)
     },
   }
 }
@@ -443,13 +446,15 @@ describe('epicReady from landed', () => {
     return { github, post, lines, deps }
   }
 
-  it('updates the branch, marks it ready, comments and posts to Slack once the last ticket closes', async () => {
+  it('updates the branch, dispatches its checks, marks it ready, comments and posts to Slack once the last ticket closes', async () => {
     const { github, post, deps } = setup('CLOSED', epicPull())
     await landed(40, { ...deps, slackWebhook: webhook })
     expect(github.calls).toEqual([
       'close #11',
       'find epic pull for #2',
       'update #39',
+      'dispatch ci.yml on epic/2',
+      'dispatch factory.yml on epic/2 {"pr":"39"}',
       'ready #39',
       'comment #39 All tickets in E1 have merged. Ready for human approval into main.',
     ])
@@ -500,8 +505,33 @@ describe('epicReady from landed', () => {
       throw new Error('422 from PUT update-branch: merge conflict')
     }
     await expect(landed(40, deps)).resolves.toBeUndefined()
+    // Neither check is dispatched: the head is unchanged, so a dispatch would only re-test the old commit.
     expect(github.calls).toEqual(['close #11', 'find epic pull for #2'])
     expect(lines).toContain('epic #2: readiness step failed: 422 from PUT update-branch: merge conflict')
+  })
+  it('dispatches the checks even when the branch was already current with main', async () => {
+    const { github, deps } = setup('CLOSED', epicPull(), 'CLOSED')
+    github.updateBranch = async () => false
+    expect(await epicReady(2, deps)).toBe('ready')
+    expect(github.calls.filter((c) => c.startsWith('dispatch'))).toEqual(['dispatch ci.yml on epic/2', 'dispatch factory.yml on epic/2 {"pr":"39"}'])
+  })
+  it('sends the dispatch to the workflow dispatches endpoint with the branch and input', async () => {
+    const requests: { method: string; url: string; body: unknown }[] = []
+    vi.stubGlobal('fetch', async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ method: String(init?.method), url: String(url), body: JSON.parse(String(init?.body)) })
+      return new Response(null, { status: 204 })
+    })
+    try {
+      const github = restGitHub('token', 'vibing-out/vbt')
+      await github.dispatchWorkflow('ci.yml', 'epic/2')
+      await github.dispatchWorkflow('factory.yml', 'epic/2', { pr: '39' })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(requests).toEqual([
+      { method: 'POST', url: 'https://api.github.com/repos/vibing-out/vbt/actions/workflows/ci.yml/dispatches', body: { ref: 'epic/2' } },
+      { method: 'POST', url: 'https://api.github.com/repos/vibing-out/vbt/actions/workflows/factory.yml/dispatches', body: { ref: 'epic/2', inputs: { pr: '39' } } },
+    ])
   })
   it('escapes the epic title in the Slack message', () => {
     expect(epicReadyMessage(epicPull(), 'E1 <@here> & co')).toBe('<!here> *<https://github.com/vibing-out/vbt/pull/39|E1 &lt;&gt; &amp; co>* is ready for approval into main')

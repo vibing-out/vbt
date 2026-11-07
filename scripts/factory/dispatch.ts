@@ -56,6 +56,9 @@ export interface GitHub {
   // Merges `main` into the pull request's branch when it is behind; false when it was already current.
   updateBranch(pull: EpicPull): Promise<boolean>
   markReady(pull: EpicPull): Promise<void>
+  // Starts a workflow_dispatch run of `.github/workflows/<file>` on `ref`. Dispatches made with GITHUB_TOKEN
+  // still start runs, unlike pushes, so this is how the epic branch's required checks run after update-branch.
+  dispatchWorkflow(file: string, ref: string, inputs?: Record<string, string>): Promise<void>
 }
 
 // Runs scripts/context.ts with these arguments and this standard input; resolves to its stdout.
@@ -265,7 +268,8 @@ export async function landed(number: number, deps: Deps): Promise<void> {
 }
 
 // Once every ticket in the epic is closed, brings the epic pull request up to date with `main` (whose
-// ruleset requires it), marks it ready for review, comments and posts to Slack. A pull request that is
+// ruleset requires it), dispatches its required checks on the new head, marks it ready for review,
+// comments and posts to Slack. A pull request that is
 // already ready was handled by an earlier run, so nothing is repeated. Failures are logged, not thrown:
 // the ticket has already merged and closed, and a person can mark the pull request ready by hand.
 export async function epicReady(
@@ -290,6 +294,11 @@ export async function epicReady(
       return 'already-ready'
     }
     const updated = await github.updateBranch(pull)
+    // The required checks `check` (ci.yml) and `context-check` (factory.yml) must pass on the head commit.
+    // An update-branch push made with GITHUB_TOKEN starts neither, so both are dispatched on the branch.
+    // Dispatched even when the branch was already current: the head may still lack runs of its own.
+    await github.dispatchWorkflow('ci.yml', pull.head)
+    await github.dispatchWorkflow('factory.yml', pull.head, { pr: String(pull.number) })
     await github.markReady(pull)
     const name = epicId(epic.title) ?? `#${epicNumber}`
     await github.comment(pull.number, `All tickets in ${name} have merged. Ready for human approval into main.`)
@@ -532,6 +541,9 @@ export function restGitHub(token: string, repository: string): GitHub {
         variables: { id: pull.nodeId },
       })) as { errors?: { message: string }[] }
       if (result.errors?.length) throw new Error(`GraphQL: ${result.errors.map((e) => e.message).join('; ')}`)
+    },
+    async dispatchWorkflow(file, ref, inputs) {
+      await call('POST', `/repos/${owner}/${name}/actions/workflows/${encodeURIComponent(file)}/dispatches`, { ref, ...(inputs && { inputs }) })
     },
   }
 }

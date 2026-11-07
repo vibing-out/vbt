@@ -1,21 +1,28 @@
 import { expect, test } from "@playwright/test";
 
-// When the product database env is set (preview, local with .env.local), the greeting must be the
-// real database value. In CI without it, the page must still render the same structure.
+// The tests run against a local `next start` (see playwright.config.ts), which loads env from the
+// process and from .env* files; the config loads the same files into this runner. When the product
+// database env is set (CI secrets or a local .env.local), the greeting must be the real database
+// value; without it, that test is reported as skipped rather than passing silently.
 const hasProductDb = !!process.env.NEXT_PUBLIC_SUPABASE_URL && !!process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
 test("home page renders greeting, flag and context-log region @smoke", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "VBT" })).toBeVisible();
-
-  const greeting = page.getByTestId("greeting");
-  await expect(greeting).toBeVisible();
-  if (hasProductDb) await expect(greeting).toHaveText("Hello, VBT");
+  await expect(page.getByTestId("greeting")).toBeVisible();
 
   await expect(page.getByTestId("flag-pipeline-smoke")).toBeVisible();
   await expect(page.getByTestId("flag-pipeline-smoke")).toHaveText(/pipeline-smoke flag: (on|off)/);
   await expect(page.getByTestId("context-log")).toBeVisible();
-  await expect(page.getByTestId("context-log")).toHaveText(/Context log: (no entries|\d+ recent entr(y|ies))/);
+  await expect(page.getByTestId("context-log")).toHaveText(
+    /Context log: (unavailable|no entries|\d+ recent entr(y|ies))/,
+  );
+});
+
+test("greeting is the product database value @smoke", async ({ page }) => {
+  test.skip(!hasProductDb, "product DB env not set");
+  await page.goto("/");
+  await expect(page.getByTestId("greeting")).toHaveText("Hello, VBT");
 });
 
 // The Playwright web server runs `next build` first, so the client bundle exists here.

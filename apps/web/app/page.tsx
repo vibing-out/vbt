@@ -16,9 +16,11 @@ export default async function Home() {
       <p>{placeholderStatus()}</p>
       <p data-testid="flag-pipeline-smoke">pipeline-smoke flag: {smoke ? "on" : "off"}</p>
       <section data-testid="context-log" aria-label="Context log" style={{ color: tokens.color.muted }}>
-        {contextCount === null || contextCount === 0
-          ? "Context log: no entries"
-          : `Context log: ${contextCount} recent ${contextCount === 1 ? "entry" : "entries"}`}
+        {contextCount === null
+          ? "Context log: unavailable"
+          : contextCount === 0
+            ? "Context log: no entries"
+            : `Context log: ${contextCount} recent ${contextCount === 1 ? "entry" : "entries"}`}
       </section>
     </main>
   );

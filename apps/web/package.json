@@ -24,6 +24,7 @@
     "server-only": "0.0.1"
   },
   "devDependencies": {
+    "@next/env": "16.4.5",
     "@playwright/test": "1.65.0",
     "@types/node": "24.10.1",
     "@types/react": "19.3.0",

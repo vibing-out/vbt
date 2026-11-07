@@ -1,4 +1,9 @@
+import nextEnv from "@next/env";
 import { defineConfig, devices } from "@playwright/test";
+
+// Load .env, .env.local, etc. exactly as `next build`/`next start` do, so the test runner sees the
+// same env as the server it starts (the smoke spec gates the greeting assert on it).
+nextEnv.loadEnvConfig(import.meta.dirname);
 
 const port = Number(process.env.PORT ?? 3100);
 

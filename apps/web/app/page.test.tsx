@@ -35,11 +35,17 @@ test("keeps the pipeline-smoke flag display", async () => {
 
 test("renders the context-log count, or a stable empty region", async () => {
   expect(await render()).toMatch(/data-testid="context-log"[^>]*>Context log: 4 recent entries</);
+  mocks.count.mockResolvedValueOnce(1);
+  expect(await render()).toMatch(/data-testid="context-log"[^>]*>Context log: 1 recent entry</);
   mocks.count.mockResolvedValueOnce(0);
   expect(await render()).toMatch(/data-testid="context-log"[^>]*>Context log: no entries</);
+});
+
+test("a failed context-log read is shown as unavailable, not as an empty log", async () => {
   mocks.count.mockResolvedValueOnce(null);
   mocks.greeting.mockResolvedValueOnce(null);
   const html = await render();
-  expect(html).toMatch(/data-testid="context-log"[^>]*>Context log: no entries</);
+  expect(html).toMatch(/data-testid="context-log"[^>]*>Context log: unavailable</);
+  expect(html).not.toContain("Context log: no entries");
   expect(html).toContain('data-testid="greeting">Greeting unavailable');
 });

@@ -7,7 +7,9 @@
 // addressing rule still applies.
 // Stages: triage -> spec -> implement -> review (up to MAX_REVIEW_ROUNDS, fixes go back to implement; low-severity
 // fixes left after the last round are fixed and checked, not re-reviewed) ->
-// required checks -> squash merge -> dispatch.ts `landed` in-process. The prompts are
+// required checks -> squash merge -> dispatch.ts `landed` in-process. A sync ticket (dispatch.ts opens one
+// when an epic pull request conflicts with main) instead runs: merge main -> sync (Claude Code resolves the
+// conflicts) -> required checks -> merge commit -> `landed`. The prompts are
 // scripts/factory/prompts/<stage>.md; each gets the ticket and earlier stages' output appended as data.
 //
 // Environment: GITHUB_TOKEN (also GH_TOKEN for the gh CLI), GITHUB_REPOSITORY, CLAUDE_CODE_OAUTH_TOKEN,
@@ -19,10 +21,10 @@
 import { spawn } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { landed, notify, refreshRollup, restGitHub, runContext, ticketId, type Deps as DispatchDeps, type GitHub, type Issue } from './dispatch.ts'
+import { isSyncTicket, landed, notify, refreshRollup, restGitHub, runContext, ticketId, type Deps as DispatchDeps, type GitHub, type Issue } from './dispatch.ts'
 import { check as checkReport, render as renderReport } from './report.ts'
 
-export const STAGES = ['triage', 'spec', 'implement', 'review'] as const
+export const STAGES = ['triage', 'spec', 'implement', 'review', 'sync'] as const
 export type Stage = (typeof STAGES)[number]
 export type Verdict = 'clean' | 'fixes' | 'needs-human'
 export const MAX_REVIEW_ROUNDS = 2
@@ -40,6 +42,11 @@ export const TOOLS: Record<Stage, { allowed: string; disallowed: string }> = {
   // Review also runs three focused passes as subagents (Task); they inherit the disallowed list, so stay read-only.
   review: { allowed: `${READ_ONLY.allowed},Task`, disallowed: READ_ONLY.disallowed },
   implement: { allowed: 'Read,Edit,Write,Glob,Grep,Bash', disallowed: 'Bash(git push:*),Bash(git commit:*),Bash(gh:*)' },
+  // Mid-merge: it may `git add` resolved files, but not finish, abort or rewrite the merge.
+  sync: {
+    allowed: 'Read,Edit,Write,Glob,Grep,Bash',
+    disallowed: 'Bash(git push:*),Bash(git commit:*),Bash(gh:*),Bash(git merge:*),Bash(git reset:*),Bash(git rebase:*),Bash(git checkout:*)',
+  },
 }
 
 // Appended to every prompt, so the routing contract lives with the router and the prompt files can change freely.
@@ -48,6 +55,7 @@ export const CONTRACT: Record<Stage, string> = {
   spec: 'VERDICT: clean when the plan is complete, needs-human when its "Needs human" section is not "none".',
   implement: 'VERDICT: clean when every acceptance criterion is met and lint, type check and tests pass, fixes when something is still failing, needs-human only for a true blocker.',
   review: 'VERDICT: clean when there are no findings, fixes when there are unambiguous fixes, needs-human only for a finding that changes a locked interface or another ticket\'s owned area.',
+  sync: 'VERDICT: clean when every conflict is resolved and lint, type check and tests pass, fixes when something is still failing, needs-human only when main and the epic contradict on a locked interface or another ticket\'s owned area.',
 }
 
 export function withContract(stage: Stage, prompt: string, data: { heading: string; text: string }[]): string {
@@ -276,6 +284,23 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
     return run
   }
 
+  // Marks the pull request ready, waits for its required checks (the caller dispatched them: a push with
+  // GITHUB_TOKEN starts none), merges it once they pass, and runs `landed` in-process.
+  const land = async (pr: number, method: '--squash' | '--merge'): Promise<void> => {
+    await ok('gh', ['pr', 'ready', String(pr)])
+    for (let waited = 0; ; waited += 30_000) {
+      const r = await exec('gh', ['pr', 'checks', String(pr), '--required', '--json', 'name,bucket'])
+      const list = r.stdout.trim() ? (JSON.parse(r.stdout) as { name: string; bucket: string }[]) : []
+      const failed = list.filter((c) => c.bucket === 'fail' || c.bucket === 'cancel')
+      if (failed.length) await stopForHuman([number, pr], `required checks failed: ${failed.map((c) => c.name).join(', ')}.`)
+      if (list.length && list.every((c) => c.bucket === 'pass' || c.bucket === 'skipping')) break
+      if (waited > 30 * 60_000) await stopForHuman([number, pr], 'required checks did not finish within 30 minutes.')
+      await deps.sleep(30_000)
+    }
+    await ok('gh', ['pr', 'merge', String(pr), method])
+    await deps.landed(pr)
+  }
+
   let pr = 0 // the ticket's pull request, once opened
   try {
     // Wait for a slot, so at most MAX_PARALLEL_TICKETS Opus tickets share the subscription's limits.
@@ -335,6 +360,60 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
       const body = `Closes #${epic.number}\n\nThe description is being written by \`dispatch.ts rollup\`.\n\n\`\`\`context-log\n{"version": 1, "decisions": [], "corrections": []}\n\`\`\``
       await ok('gh', ['pr', 'create', '--draft', '--base', 'main', '--head', epicBranch, '--title', epic.title, '--label', 'epic', '--body-file', '-'], { input: body })
       await deps.rollup(epic.number)
+    }
+
+    // A sync ticket merges main into the epic on its own branch. No triage, spec or review: there is nothing
+    // to plan, and its diff against the epic is main's already-approved work. It lands as a merge commit;
+    // a squash would drop main's history from the epic branch, and the same conflict would come back.
+    if (isSyncTicket(issue.title, epic.number)) {
+      const cwd = WORKTREE
+      const branch = `sync/epic-${epic.number}-main`
+      await ok('git', ['worktree', 'add', '-B', branch, WORKTREE, `origin/${epicBranch}`])
+      const merge = await exec('git', ['merge', '--no-ff', '--no-edit', 'origin/main'], { cwd })
+      if (/already up to date/i.test(merge.stdout)) return await stopForHuman([number], `main is already in \`${epicBranch}\`; close this ticket.`)
+      const conflicted = merge.code === 0 ? '' : await ok('git', ['diff', '--name-only', '--diff-filter=U'], { cwd })
+      if (merge.code !== 0 && !conflicted) throw new Error(`git merge origin/main exited with ${merge.code}: ${(merge.stderr || merge.stdout).slice(-1500)}`)
+      const text = `#${issue.number} ${issue.title}\n\n${await ok('gh', ['issue', 'view', String(number), '--json', 'body', '--jq', '.body'])}`
+      const modelsLines: string[] = []
+      let summary = 'Merged origin/main without conflicts.'
+      let checks = ''
+      for (let attempt = 1; ; attempt++) {
+        // A clean merge skips Claude Code unless the merged code fails the checks.
+        if (conflicted || attempt > 1) {
+          const run = await claude('sync', [
+            { heading: 'Ticket', text },
+            { heading: 'Conflicted files', text: conflicted || '(none: the merge was clean)' },
+            ...(attempt > 1 ? [{ heading: 'Failing checks', text: checks }] : []),
+          ])
+          modelsLines.push(`sync attempt ${attempt}: ${run.modelsLine}`)
+          summary = run.text
+          if (verdict(run.text) === NEEDS_HUMAN) await stopForHuman([number], 'main and the epic contradict on a locked interface or another ticket\'s area (see the run log).')
+        }
+        const markers = await exec('git', ['grep', '-nE', '^(<<<<<<<|>>>>>>>) '], { cwd })
+        const r = markers.code === 0
+          ? { code: 1, stdout: `Conflict markers remain:\n${markers.stdout}`, stderr: '' }
+          : await exec('sh', ['-c', 'pnpm install && pnpm lint && pnpm typecheck && pnpm test'], { cwd })
+        checks = `${r.code === 0 ? 'All passed.' : `Failed (exit ${r.code}).`}\n\n\`\`\`text\n${(r.stdout + r.stderr).slice(-3000)}\n\`\`\``
+        if (r.code === 0) break
+        if (attempt === 2) await stopForHuman([number], 'conflicts or checks still fail after two sync attempts.')
+      }
+      await ok('git', ['add', '-A'], { cwd })
+      if ((await exec('git', ['rev-parse', '-q', '--verify', 'MERGE_HEAD'], { cwd })).code === 0) await ok('git', ['commit', '--no-edit'], { cwd })
+      else if ((await exec('git', ['diff', '--cached', '--quiet'], { cwd })).code !== 0)
+        await ok('git', ['commit', '-m', `${ticketId(issue.title)} Fix checks after merging main`], { cwd })
+      // Proves main's history is in the branch before anything is pushed.
+      await ok('git', ['merge-base', '--is-ancestor', 'origin/main', 'HEAD'], { cwd })
+      await ok('git', ['push', '-u', 'origin', branch, '--force-with-lease'], { cwd })
+      const note = `Sync ticket: no review rounds, since the diff against \`${epicBranch}\` is main's approved work.${conflicted ? ` Conflicts resolved in: ${conflicted.split('\n').join(', ')}.` : ''}`
+      const body = prBody({ ticket: number, summary: `${summary.trim()}\n\n${note}`, checks, modelsLines, rounds: [], decisions: [], runUrl })
+      await ok('node', ['scripts/context.ts', 'check'], { input: body, cwd: REPO_ROOT })
+      const url = await ok('gh', ['pr', 'create', '--draft', '--base', epicBranch, '--head', branch, '--label', 'factory:vbt', '--title', issue.title, '--body-file', '-'], { input: body })
+      pr = Number(/\/pull\/(\d+)/.exec(url)?.[1])
+      await github.dispatchWorkflow('ci.yml', branch)
+      await github.dispatchWorkflow('factory.yml', branch, { pr: String(pr) })
+      await land(pr, '--merge')
+      await comment(number, `Merged pull request #${pr} into \`${epicBranch}\` with a merge commit.`)
+      return 'merged'
     }
 
     // The ticket's own working copy, so this checkout of main (and this script) never changes underneath.
@@ -451,19 +530,8 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
     const finalBody = prBody({ ticket: number, summary, checks, modelsLines, rounds, decisions: decisions(spec.text), runUrl, unreviewed })
     await ok('node', ['scripts/context.ts', 'check'], { input: finalBody, cwd: REPO_ROOT })
     await ok('gh', ['pr', 'edit', String(pr), '--body-file', '-'], { input: finalBody })
-    await ok('gh', ['pr', 'ready', String(pr)])
     // The last review round already dispatched the checks for this head commit.
-    for (let waited = 0; ; waited += 30_000) {
-      const r = await exec('gh', ['pr', 'checks', String(pr), '--required', '--json', 'name,bucket'])
-      const list = r.stdout.trim() ? (JSON.parse(r.stdout) as { name: string; bucket: string }[]) : []
-      const failed = list.filter((c) => c.bucket === 'fail' || c.bucket === 'cancel')
-      if (failed.length) await stopForHuman([number, pr], `required checks failed: ${failed.map((c) => c.name).join(', ')}.`)
-      if (list.length && list.every((c) => c.bucket === 'pass' || c.bucket === 'skipping')) break
-      if (waited > 30 * 60_000) await stopForHuman([number, pr], 'required checks did not finish within 30 minutes.')
-      await deps.sleep(30_000)
-    }
-    await ok('gh', ['pr', 'merge', String(pr), '--squash'])
-    await deps.landed(pr)
+    await land(pr, '--squash')
     await comment(number, `Merged pull request #${pr} into \`${epicBranch}\` after ${rounds.length} review round(s).`)
     return 'merged'
   } catch (err) {

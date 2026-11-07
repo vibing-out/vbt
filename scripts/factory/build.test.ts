@@ -168,7 +168,10 @@ const ticket: Issue = {
 }
 
 // Scripted world: Claude's answer per stage, every command recorded in order.
-function world(answers: Partial<Record<Stage, string[]>>, opts: { checksFail?: boolean; inFlight?: string; authFails?: boolean } = {}) {
+function world(
+  answers: Partial<Record<Stage, string[]>>,
+  opts: { checksFail?: boolean; inFlight?: string; issue?: Issue; merge?: { code: number; stdout: string }; markers?: boolean; authFails?: boolean } = {},
+) {
   const calls: string[] = []
   const inputs: string[] = [] // standard input of each command, such as pull request bodies
   const labels: string[] = []
@@ -181,7 +184,7 @@ function world(answers: Partial<Record<Stage, string[]>>, opts: { checksFail?: b
     if (command === 'claude' && args.includes('Reply with exactly: OK')) return opts.authFails ? { code: 1, stdout: '', stderr: 'Invalid OAuth token sk-ant-oat01-abc' } : done(claudeJson('OK', ['claude-haiku-5-5']))
     if (command === 'claude' && args.includes('--continue')) return done(claudeJson('still not a report'))
     if (command === 'claude') {
-      const stage = (['triage', 'spec', 'implement', 'review'] as Stage[]).find((s) => options?.input?.includes(`STAGE:${s}`))!
+      const stage = (['triage', 'spec', 'implement', 'review', 'sync'] as Stage[]).find((s) => options?.input?.includes(`STAGE:${s}`))!
       return done(claudeJson(queue[stage]!.shift()!))
     }
     if (line.includes('actions/workflows/build.yml/runs')) return done('7')
@@ -191,6 +194,9 @@ function world(answers: Partial<Record<Stage, string[]>>, opts: { checksFail?: b
     if (line.startsWith('gh issue comment')) return done(`https://github.com/vibing-out/vbt/issues/${args[2]}#issuecomment-${calls.length}`)
     if (line.startsWith('gh issue view')) return done('ticket body')
     if (line.startsWith('sh -c')) return opts.checksFail ? { code: 1, stdout: '', stderr: 'test failed' } : done('ok')
+    if (line.startsWith('git merge --no-ff')) return { ...(opts.merge ?? { code: 0, stdout: 'Merge made' }), stderr: '' }
+    if (line.startsWith('git diff --name-only --diff-filter=U')) return done('.env.example\napps/web/x.ts')
+    if (line.startsWith('git grep')) return opts.markers ? done('.env.example:3:<<<<<<< HEAD') : { code: 1, stdout: '', stderr: '' }
     if (line.startsWith('git diff --cached')) return { code: 1, stdout: '', stderr: '' }
     if (line.startsWith('git diff')) return done('diff --git a/x b/x')
     if (line.startsWith('gh pr create')) return done('https://github.com/vibing-out/vbt/pull/34')
@@ -198,7 +204,7 @@ function world(answers: Partial<Record<Stage, string[]>>, opts: { checksFail?: b
     return done()
   }
   const github = {
-    issue: async () => ticket,
+    issue: async () => opts.issue ?? ticket,
     epicPull: async () => ({ number: 9, url: 'u', draft: true, nodeId: 'n', head: 'epic/4' }),
     addLabels: async (_n: number, l: string[]) => void labels.push(...l),
     dispatchWorkflow: async (file: string) => void calls.push(`dispatch ${file}`),
@@ -352,5 +358,48 @@ describe('build', () => {
     expect(await build(32, w.deps)).toBe('needs-human')
     expect(w.calls.filter((c) => c.startsWith('claude') && c.includes('Read,Edit,Write')).length).toBe(2)
     expect(w.calls.some((c) => c.startsWith('git push'))).toBe(false)
+  })
+})
+
+describe('build a sync ticket', () => {
+  const sync: Issue = { ...ticket, ...ref(60, 'T-00a Sync epic/4 with main', ['factory-ready']) }
+  const conflict = { code: 1, stdout: 'CONFLICT (content): Merge conflict in .env.example' }
+
+  it('merges main, has Claude Code resolve the conflicts, and lands a merge commit without triage, spec or review', async () => {
+    const w = world({ sync: ['Kept both keys.\nVERDICT: clean'] }, { issue: sync, merge: conflict })
+    expect(await build(60, w.deps)).toBe('merged')
+    const claudeStages = w.calls.filter((c) => c.startsWith('claude') && !c.includes('Reply with exactly: OK'))
+    expect(claudeStages).toHaveLength(1)
+    expect(claudeStages[0]).toContain('Bash(git merge:*)')
+    const order = w.calls.filter((c) => /^(git (worktree|merge|commit|push)|gh pr (create|ready|merge))/.test(c))
+    expect(order).toEqual([
+      'git worktree add -B sync/epic-4-main /tmp/ticket origin/epic/4',
+      'git merge --no-ff --no-edit origin/main',
+      'git commit --no-edit',
+      'git merge-base --is-ancestor origin/main HEAD',
+      'git push -u origin sync/epic-4-main --force-with-lease',
+      'gh pr create --draft --base epic/4 --head sync/epic-4-main --label factory:vbt --title T-00a Sync epic/4 with main --body-file -',
+      'gh pr ready 34',
+      'gh pr merge 34 --merge',
+    ])
+    expect(w.calls).toContain('landed 34')
+  })
+  it('skips Claude Code when main merges cleanly and the checks pass', async () => {
+    const w = world({}, { issue: sync })
+    expect(await build(60, w.deps)).toBe('merged')
+    expect(w.calls.some((c) => c.startsWith('claude') && !c.includes('Reply with exactly: OK'))).toBe(false)
+    expect(w.calls).toContain('gh pr merge 34 --merge')
+  })
+  it('stops for a person when conflict markers remain after two attempts, and pushes nothing', async () => {
+    const w = world({ sync: ['a\nVERDICT: fixes', 'b\nVERDICT: fixes'] }, { issue: sync, merge: conflict, markers: true })
+    expect(await build(60, w.deps)).toBe('needs-human')
+    expect(w.calls.filter((c) => c.startsWith('claude') && !c.includes('Reply with exactly: OK'))).toHaveLength(2)
+    expect(w.calls.some((c) => c.startsWith('sh -c'))).toBe(false)
+    expect(w.calls.some((c) => c.startsWith('git push'))).toBe(false)
+  })
+  it('stops for a person when main is already in the epic', async () => {
+    const w = world({}, { issue: sync, merge: { code: 0, stdout: 'Already up to date.' } })
+    expect(await build(60, w.deps)).toBe('needs-human')
+    expect(w.calls.some((c) => c.startsWith('gh pr create'))).toBe(false)
   })
 })

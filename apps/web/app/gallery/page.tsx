@@ -136,7 +136,7 @@ function Cards({ mode }: { mode: Mode }) {
     <div className="flex flex-col gap-6">
       <Card mode={mode}>
         <CardHeader>
-          <CardTitle mode={mode}>{mode === "admin" ? "Precinct 12 batch" : "Your ballot is safe"}</CardTitle>
+          <CardTitle mode={mode} level={3}>{mode === "admin" ? "Precinct 12 batch" : "Your ballot is safe"}</CardTitle>
           <CardDescription mode={mode}>
             {mode === "admin"
               ? "This publishes a signed record for every ballot in the batch."
@@ -151,7 +151,7 @@ function Cards({ mode }: { mode: Mode }) {
       </Card>
       <Card variant="hero" mode={mode}>
         <CardHeader>
-          <CardTitle mode={mode}>{mode === "admin" ? "3 precincts selected" : "Track your ballot"}</CardTitle>
+          <CardTitle mode={mode} level={3}>{mode === "admin" ? "3 precincts selected" : "Track your ballot"}</CardTitle>
           <CardDescription mode={mode}>
             {mode === "admin"
               ? "Counting them moves 3,412 ballots to Counted at precinct."

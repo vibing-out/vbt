@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { tokens } from "@vbt/ui";
-import { pipelineSmoke } from "../flags";
-import { countContextEntries } from "../lib/context-log";
-import { readGreeting } from "../lib/product-db";
-import { placeholderStatus } from "../lib/status";
+import { pipelineSmoke } from "../../flags";
+import { countContextEntries } from "../../lib/context-log";
+import { readGreeting } from "../../lib/product-db";
+import { placeholderStatus } from "../../lib/status";
 
 export default async function Home() {
   const [smoke, greeting, contextCount] = await Promise.all([pipelineSmoke(), readGreeting(), countContextEntries()]);

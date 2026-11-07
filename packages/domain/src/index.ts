@@ -43,6 +43,8 @@ export {
   mismatchReportScope,
   type MismatchRow,
 } from "./mismatch.ts";
+
+export {
   affectedBallotIds,
   CHECK_FAILURES,
   CHECK_SCOPES,

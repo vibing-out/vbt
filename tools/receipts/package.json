@@ -1,0 +1,26 @@
+{
+  "name": "@vbt/receipts",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "24.x" },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "generate": "node src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "pdf-lib": "1.17.1",
+    "qrcode": "1.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/qrcode": "1.5.6",
+    "jsqr": "1.4.0",
+    "pdfjs-dist": "6.5.438",
+    "typescript": "5.9.3",
+    "vitest": "5.1.0"
+  }
+}

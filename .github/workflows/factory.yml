@@ -1,0 +1,87 @@
+# The factory's deterministic routing: each job runs one subcommand of scripts/factory/dispatch.ts.
+#   check          a ticket gets `queued`: post earlier context, then label factory-ready (Warp's trigger) or blocked
+#   landed         a pull request merges into epic/*: log its context-log block, close the ticket, re-check what it blocked
+#   context-check  a pull request into epic/* opens or changes: its body needs one valid context-log block (a required check)
+#
+# Repository secrets required (the factory-dispatch identity in the context log, see the vbt-context README):
+#   CONTEXT_SUPABASE_URL, CONTEXT_SUPABASE_PUBLISHABLE_KEY, CONTEXT_EMAIL, CONTEXT_PASSWORD
+#
+# Safety: only issue and pull request numbers reach `run:`, through env; titles and bodies are read by the
+# script from the API. Every job checks out the default branch, so a pull request can't change the script
+# that judges it. `pull_request_target` is never used.
+
+name: Factory
+
+on:
+  issues:
+    types: [labeled]
+  pull_request:
+    types: [opened, edited, synchronize, closed]
+    branches: ['epic/**']
+
+permissions:
+  issues: write
+  pull-requests: read
+  contents: read
+
+jobs:
+  check:
+    if: github.event_name == 'issues' && github.event.label.name == 'queued'
+    # Per job, not per workflow: a workflow-level group would let an unrelated label event cancel a pending check.
+    concurrency:
+      group: factory-${{ github.event.issue.number }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          SUPABASE_URL: ${{ secrets.CONTEXT_SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.CONTEXT_SUPABASE_PUBLISHABLE_KEY }}
+          CONTEXT_EMAIL: ${{ secrets.CONTEXT_EMAIL }}
+          CONTEXT_PASSWORD: ${{ secrets.CONTEXT_PASSWORD }}
+        run: node scripts/factory/dispatch.ts check "$ISSUE"
+
+  landed:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged
+    concurrency:
+      group: factory-landed-${{ github.event.pull_request.number }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          SUPABASE_URL: ${{ secrets.CONTEXT_SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.CONTEXT_SUPABASE_PUBLISHABLE_KEY }}
+          CONTEXT_EMAIL: ${{ secrets.CONTEXT_EMAIL }}
+          CONTEXT_PASSWORD: ${{ secrets.CONTEXT_PASSWORD }}
+        run: node scripts/factory/dispatch.ts landed "$PR"
+
+  context-check:
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: node scripts/factory/dispatch.ts context-check "$PR"

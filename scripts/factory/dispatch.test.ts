@@ -102,10 +102,6 @@ function fakeGitHub(
     async mergeable() {
       return this.mergeableState
     },
-    async updateBranch(p) {
-      calls.push(`update #${p.number}`)
-      return true
-    },
     async markReady(p) {
       calls.push(`ready #${p.number}`)
       if (epicPull) epicPull.draft = false
@@ -685,7 +681,6 @@ describe('epicReady from landed', () => {
       'find epic pull for #2',
       'edit body #39: Closes #2',
       'find epic pull for #2',
-      'update #39',
       'dispatch ci.yml on epic/2',
       'dispatch factory.yml on epic/2 {"pr":"39"}',
       'ready #39',
@@ -735,17 +730,16 @@ describe('epicReady from landed', () => {
   })
   it('logs a failure without failing landed, since the ticket has already merged', async () => {
     const { github, lines, deps } = setup('CLOSED', epicPull())
-    github.updateBranch = async () => {
-      throw new Error('502 from PUT update-branch: bad gateway')
+    github.dispatchWorkflow = async () => {
+      throw new Error('502 from POST dispatches: bad gateway')
     }
     await expect(landed(40, deps)).resolves.toBeUndefined()
-    // Neither check is dispatched: the head is unchanged, so a dispatch would only re-test the old commit.
+    // Not marked ready: its required checks never started. The roll-up was written before the readiness step.
     expect(github.calls).toEqual(['close #11', 'find epic pull for #2', 'edit body #39: Closes #2', 'find epic pull for #2'])
-    expect(lines).toContain('epic #2: readiness step failed: 502 from PUT update-branch: bad gateway')
+    expect(lines).toContain('epic #2: readiness step failed: 502 from POST dispatches: bad gateway')
   })
-  it('dispatches the checks even when the branch was already current with main', async () => {
+  it('dispatches the checks and marks ready without touching the epic branch, even when it is behind main', async () => {
     const { github, deps } = setup('CLOSED', epicPull(), 'CLOSED')
-    github.updateBranch = async () => false
     expect(await epicReady(2, deps)).toBe('ready')
     expect(github.calls.filter((c) => c.startsWith('dispatch'))).toEqual(['dispatch ci.yml on epic/2', 'dispatch factory.yml on epic/2 {"pr":"39"}'])
   })
@@ -787,9 +781,9 @@ describe('sync tickets for an epic that conflicts with main', () => {
     'find epic pull for #2',
     'create "T-00a Sync epic/2 with main" in #2: `main` and `epic/2` both changed the same lines, so epic pull request #39 conflicts and cannot merge.',
     'label #50 +queued',
-    'comment #39 This pull request conflicts with `main`. Opened #50 to merge `main` into `epic/2`.',
     'context #50 ## Context from earlier tickets',
     'label #50 +factory-ready',
+    'comment #39 This pull request conflicts with `main`. Opened #50 to merge `main` into `epic/2`.',
   ]
 
   it('recognizes only a T-00 sync title for the same epic', () => {
@@ -802,6 +796,17 @@ describe('sync tickets for an epic that conflicts with main', () => {
     const { github, deps } = setup()
     expect(await epicReady(2, deps)).toBe('conflict')
     expect(github.calls).toEqual(opened)
+  })
+  it('still dispatches the sync ticket when commenting on the epic pull request is refused (#78)', async () => {
+    const { github, lines, deps } = setup()
+    const comment = github.comment.bind(github)
+    github.comment = async (n, body) => {
+      if (n === 39) throw new Error('403 from POST /issues/39/comments: Resource not accessible by integration')
+      return comment(n, body)
+    }
+    expect(await epicReady(2, deps)).toBe('conflict')
+    expect(github.calls).toEqual(opened.slice(0, -1))
+    expect(lines).toContain('epic #2: could not comment on #39: 403 from POST /issues/39/comments: Resource not accessible by integration')
   })
   it('opens no second sync ticket while one is open', async () => {
     const { github, lines, deps } = setup([ref(12, 'T-04 Schema'), ref(57, 'T-00a Sync epic/2 with main')])
@@ -821,15 +826,6 @@ describe('sync tickets for an epic that conflicts with main', () => {
     expect(await epicReady(2, deps)).toBe('waiting')
     expect(github.calls).toEqual(['find epic pull for #2'])
     expect(lines).toContain('epic #2: GitHub has not computed whether #39 conflicts; the next landed or push to main re-checks')
-  })
-  it('opens a sync ticket when update-branch reports the conflict, and marks nothing ready', async () => {
-    const { github, deps } = setup([])
-    github.mergeableState = true
-    github.updateBranch = async () => {
-      throw new Error('422 from PUT update-branch: merge conflict between base and head')
-    }
-    expect(await epicReady(2, deps)).toBe('conflict')
-    expect(github.calls).toEqual(opened)
   })
   it('on a push to main, opens a sync ticket for a conflicting epic pull request', async () => {
     const { github, lines, deps } = setup()

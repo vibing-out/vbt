@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  check, contextCheck, isSyncTicket, syncCheck, syncTitle, contextComment, followup, followupId, ticketId, resume, resumeSkipReason, epicReady, epicReadyMessage, landed, notify, readiness, restGitHub, slackMessage, slackText, ticketNumber, trimmed, unblock, webhookUrl, refreshContext, refreshTargets,
+  check, contextCheck, refreshRollup, isSyncTicket, syncCheck, syncTitle, contextComment, followup, followupId, ticketId, resume, resumeSkipReason, epicReady, epicReadyMessage, landed, notify, readiness, restGitHub, slackMessage, slackText, ticketNumber, trimmed, unblock, webhookUrl, refreshContext, refreshTargets,
   type Actor, type Blocker, type EpicPull, type GitHub, type Issue, type IssueRef, type LabelNotice, type Pull,
 } from './dispatch.ts'
+import type { RollupPull } from './rollup.ts'
 
 const ref = (number: number, title: string, state: IssueRef['state'] = 'OPEN', labels: string[] = []): IssueRef => ({ number, title, state, labels })
 const epic = { ...ref(2, 'E1 Foundation', 'OPEN', ['epic']), subIssues: [ref(11, 'T-02 Domain'), ref(12, 'T-04 Schema'), ref(13, 'T-20 Auth')] }
@@ -27,12 +28,33 @@ function fakeGitHub(
   notice?: LabelNotice,
   epicPull: EpicPull | null = null,
   unlabeler: Actor | null = null,
-): GitHub & { calls: string[]; mergeableState: boolean | null } {
+): GitHub & {
+  calls: string[]
+  mergeableState: boolean | null
+  issueBodies: Record<number, string>
+  merged: Omit<RollupPull, 'runs'>[]
+  detail: { body: string; headSha: string; comments: { author: string | null; body: string }[] }
+} {
   const calls: string[] = []
   const byNumber = new Map(issues.map((i) => [i.number, i]))
   return {
     calls,
     mergeableState: true,
+    issueBodies: {},
+    merged: [],
+    detail: { body: '', headSha: 'b'.repeat(40), comments: [] },
+    async issueBody(n) {
+      return this.issueBodies[n] ?? ''
+    },
+    async mergedPulls() {
+      return this.merged
+    },
+    async pullDetail() {
+      return this.detail
+    },
+    async editPullBody(n, body) {
+      calls.push(`edit body #${n}: ${body.split('\n')[0]}`)
+    },
     async issue(n) {
       const found = byNumber.get(n)
       if (!found) throw new Error(`no issue ${n}`)
@@ -280,7 +302,7 @@ describe('landed', () => {
     const runs: string[] = []
     await landed(40, { github, context: async (args) => (runs.push(args[0] ?? ''), 'ok'), log: silent })
     expect(runs[0]).toBe('ingest')
-    expect(github.calls).toEqual(['close #11', 'context #12 ## Context from earlier tickets', 'label #12 +factory-ready', 'label #12 -blocked'])
+    expect(github.calls).toEqual(['close #11', 'context #12 ## Context from earlier tickets', 'label #12 +factory-ready', 'label #12 -blocked', 'find epic pull for #2'])
   })
   it('passes the pull request URL, merge commit and ticket id to ingest, with the body on stdin', async () => {
     const { github } = setup()
@@ -661,6 +683,8 @@ describe('epicReady from landed', () => {
     expect(github.calls).toEqual([
       'close #11',
       'find epic pull for #2',
+      'edit body #39: Closes #2',
+      'find epic pull for #2',
       'update #39',
       'dispatch ci.yml on epic/2',
       'dispatch factory.yml on epic/2 {"pr":"39"}',
@@ -676,7 +700,7 @@ describe('epicReady from landed', () => {
     const { github, post, lines, deps } = setup('OPEN', epicPull())
     await landed(40, { ...deps, slackWebhook: webhook })
     // The epic pull request is still read, to catch a conflict with main early.
-    expect(github.calls).toEqual(['close #11', 'find epic pull for #2'])
+    expect(github.calls).toEqual(['close #11', 'find epic pull for #2', 'edit body #39: Closes #2', 'find epic pull for #2'])
     expect(post).not.toHaveBeenCalled()
     expect(lines).toContain('epic #2: waiting on #12')
   })
@@ -696,7 +720,7 @@ describe('epicReady from landed', () => {
   it('logs and returns when no epic pull request is open', async () => {
     const { github, lines, deps } = setup('CLOSED', null)
     await landed(40, deps)
-    expect(github.calls).toEqual(['close #11', 'find epic pull for #2'])
+    expect(github.calls).toEqual(['close #11', 'find epic pull for #2', 'find epic pull for #2'])
     expect(lines).toContain('epic #2: every ticket is closed, but no open pull request from epic/2 into main')
   })
   it('still marks it ready and comments, but posts nothing, without a webhook', async () => {
@@ -716,7 +740,7 @@ describe('epicReady from landed', () => {
     }
     await expect(landed(40, deps)).resolves.toBeUndefined()
     // Neither check is dispatched: the head is unchanged, so a dispatch would only re-test the old commit.
-    expect(github.calls).toEqual(['close #11', 'find epic pull for #2'])
+    expect(github.calls).toEqual(['close #11', 'find epic pull for #2', 'edit body #39: Closes #2', 'find epic pull for #2'])
     expect(lines).toContain('epic #2: readiness step failed: 502 from PUT update-branch: bad gateway')
   })
   it('dispatches the checks even when the branch was already current with main', async () => {
@@ -880,5 +904,53 @@ describe('restGitHub sync calls', () => {
       vi.unstubAllGlobals()
     }
     expect(urls).toEqual(['POST /repos/vibing-out/vbt/issues', 'POST /repos/vibing-out/vbt/issues/2/sub_issues'])
+  })
+})
+
+describe('refreshRollup', () => {
+  // E1 (#2) holds T-02 (#11, merged as #37) and T-04 (#12, open); its epic pull request is #39.
+  const setup = () => {
+    const e1: Issue = { ...ref(2, 'E1 Foundation', 'OPEN', ['epic']), parent: null, subIssues: [ref(11, 'T-02 Domain', 'CLOSED'), ref(12, 'T-04 Schema')], blockedBy: [], blocking: [] }
+    const github = fakeGitHub([e1], undefined, undefined, { number: 39, url: 'u', draft: true, nodeId: 'PR_39', head: 'epic/2' })
+    github.issueBodies = { 2: '### Outcome\n\nA page deploys.', 11: '### How to verify in the browser\n\nOpen /.' }
+    github.merged = [
+      { number: 37, url: 'u37', body: 'Ticket: #11\n\n## Summary\nThe state machine.\n\n```context-log\n{"version": 1, "decisions": [], "corrections": []}\n```' },
+      { number: 36, url: 'u36', body: 'No ticket line: setup work.' },
+    ]
+    const checked: string[] = []
+    const lines: string[] = []
+    const deps = { github, context: async (args: string[], body?: string) => (checked.push(`${args[0]} ${body?.split('\n')[0]}`), 'ok'), log: (l: string) => lines.push(l) }
+    return { github, checked, lines, deps }
+  }
+
+  it('writes the roll-up after checking its context-log block', async () => {
+    const { github, checked, lines, deps } = setup()
+    expect(await refreshRollup(2, deps)).toBe('updated')
+    expect(checked).toEqual(['check Closes #2'])
+    expect(github.calls).toEqual(['find epic pull for #2', 'edit body #39: Closes #2'])
+    expect(lines).toContain('epic #2: roll-up on #39 updated (2 ticket(s), 2 merged pull request(s))')
+  })
+  it('leaves an unchanged description alone', async () => {
+    const { github, deps } = setup()
+    let written = ''
+    github.editPullBody = async (_n, body) => void (written = body)
+    await refreshRollup(2, deps)
+    github.detail.body = written
+    github.calls.length = 0
+    expect(await refreshRollup(2, deps)).toBe('unchanged')
+    expect(github.calls).toEqual(['find epic pull for #2'])
+  })
+  it('does nothing without an epic pull request', async () => {
+    const { github, deps } = setup()
+    github.epicPull = async () => null
+    expect(await refreshRollup(2, deps)).toBe('no-pull')
+    expect(github.calls).toEqual([])
+  })
+  it('logs a failure instead of throwing, so a landing never fails over its description', async () => {
+    const { github, lines, deps } = setup()
+    const failing = { ...deps, context: async () => Promise.reject(new Error('expected one context-log block')) }
+    expect(await refreshRollup(2, failing)).toBe('failed')
+    expect(github.calls).toEqual(['find epic pull for #2'])
+    expect(lines).toContain('epic #2: roll-up failed: expected one context-log block')
   })
 })

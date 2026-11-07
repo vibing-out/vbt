@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { generateSigningKeyPair, signStageRecord, verifyInclusionProof, verifyStageRecord } from "@vbt/crypto";
 import { chainEvent, indianaDate, verifyChain } from "@vbt/events";
 import { beforeAll, expect, test } from "vitest";
+import { stageTree } from "../../apps/web/lib/batches.ts";
 import { chainOf, count, COUNTY, ingestPayload, newBallot, OFFICIAL, PRECINCT, seedPlaces } from "./rpc-fixtures.ts";
 import { describeDb, expectStatementError, inRolledBackTransaction, useScratchDatabase } from "./support.ts";
 
@@ -8,7 +10,16 @@ const INGEST = "select public.ingest_ballot_record($1::jsonb) as r";
 const MEMBERS = "select public.batch_members($1, $2, $3) as r";
 const APPLY = "select public.apply_batch($1::jsonb) as r";
 
-type Member = { ballot_id: string; tracking_code: string; ciphertext_hash: string; head_hash: string | null; heads: number };
+type Member = {
+  ballot_id: string;
+  tracking_code: string;
+  ciphertext: string;
+  ciphertext_hash: string;
+  precinct_id: string;
+  county_id: string;
+  head_hash: string | null;
+  heads: number;
+};
 
 const N = 1000;
 
@@ -26,8 +37,15 @@ describeDb("apply_batch (T-05 AC1)", () => {
     return rows[0].r as Member[];
   }
 
-  /** The payload apps/web/lib/batches.ts sends, with a placeholder root, totals and signature. */
-  function payload(list: Member[], now = new Date()) {
+  /**
+   * The payload apps/web/lib/batches.ts sends. The stage record defaults to a placeholder root, totals
+   * and signature; the AC1 scale test passes the real tree and signature.
+   */
+  function payload(
+    list: Member[],
+    now = new Date(),
+    stage_record = { merkle_root: "a".repeat(64), ballot_count: list.length, totals: { c: { x: list.length } }, signature: "c2ln" },
+  ) {
     const occurred_on = indianaDate(now);
     return {
       batch_id: randomUUID(),
@@ -53,7 +71,7 @@ describeDb("apply_batch (T-05 AC1)", () => {
           m.head_hash,
         ).hash,
       })),
-      stage_record: { merkle_root: "a".repeat(64), ballot_count: list.length, totals: { c: { x: list.length } }, signature: "c2ln" },
+      stage_record,
     };
   }
 
@@ -75,7 +93,13 @@ describeDb("apply_batch (T-05 AC1)", () => {
       const hashes = list.map((m) => m.ciphertext_hash);
       expect(hashes).toEqual([...hashes].sort());
 
-      const body = payload(list);
+      // The real tree and signature, as buildBatch makes them (totals stay a placeholder: the RPC never decrypts).
+      const tree = stageTree(list);
+      const totals = { c: { x: N } };
+      const keys = await generateSigningKeyPair();
+      const signed = { scope: "precinct", stage: "TALLIED_PRECINCT", merkleRoot: tree.root, ballotCount: N, totals };
+      const signature = Buffer.from(await signStageRecord(signed, keys.secretKey)).toString("base64");
+      const body = payload(list, new Date(), { merkle_root: tree.root, ballot_count: N, totals, signature });
       const { rows } = await db().query(APPLY, [body]);
       expect(rows[0].r).toEqual({ batch_id: body.batch_id, stage_record_id: body.batch_id, ballot_count: N });
 
@@ -96,7 +120,9 @@ describeDb("apply_batch (T-05 AC1)", () => {
       ]);
 
       const record = await db().query(
-        "select id, scope, scope_id, stage, merkle_root, ballot_count, totals, signature, published_at <= now() as published from public.stage_records",
+        `select id, scope, scope_id, stage, merkle_root, ballot_count, totals, signature,
+                published_at is not null and published_at = now() as published_at_insert
+         from public.stage_records`,
       );
       expect(record.rows).toEqual([
         {
@@ -104,14 +130,29 @@ describeDb("apply_batch (T-05 AC1)", () => {
           scope: "precinct",
           scope_id: PRECINCT,
           stage: "TALLIED_PRECINCT",
-          merkle_root: "a".repeat(64),
+          merkle_root: tree.root,
           ballot_count: N,
-          totals: { c: { x: N } },
-          signature: "c2ln",
-          published: true,
+          totals,
+          signature,
+          published_at_insert: true,
         },
       ]);
-      expect(record.rows[0].merkle_root).toMatch(/^[0-9a-f]{64}$/);
+
+      // AC1 with AC2 at scale: every member's inclusion proof verifies against the stored root, and
+      // the stored row's signature verifies.
+      const stored = record.rows[0];
+      const storedRoot = Buffer.from(stored.merkle_root, "hex");
+      expect(tree.leaves).toHaveLength(N);
+      expect(tree.proofs).toHaveLength(N);
+      expect(tree.leaves.every((leaf, i) => verifyInclusionProof(leaf, tree.proofs[i]!, storedRoot))).toBe(true);
+      const storedRecord = {
+        scope: stored.scope,
+        stage: stored.stage,
+        merkleRoot: stored.merkle_root,
+        ballotCount: stored.ballot_count,
+        totals: stored.totals,
+      };
+      expect(await verifyStageRecord(storedRecord, Buffer.from(stored.signature, "base64"), keys.publicKey)).toBe(true);
 
       expect(verifyChain(await chainOf(db(), "B-0042"))).toEqual({ ok: true });
       expect(await members()).toEqual([]);

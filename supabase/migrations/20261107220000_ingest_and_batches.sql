@@ -400,13 +400,15 @@ begin
 
   update private.ballots set current_status = v_to where id = any (v_ids);
 
-  insert into public.stage_records (id, scope, scope_id, stage, merkle_root, ballot_count, totals, signature)
+  -- Publishing is the insert (stage_records is insert-only), so published_at is the transaction time.
+  insert into public.stage_records (id, scope, scope_id, stage, merkle_root, ballot_count, totals, signature, published_at)
   values (
     v_batch_id, v_scope, v_scope_id, v_to,
     p_batch -> 'stage_record' ->> 'merkle_root',
     v_count,
     p_batch -> 'stage_record' -> 'totals',
-    p_batch -> 'stage_record' ->> 'signature'
+    p_batch -> 'stage_record' ->> 'signature',
+    now()
   );
 
   return jsonb_build_object('batch_id', v_batch_id, 'stage_record_id', v_batch_id, 'ballot_count', v_count);

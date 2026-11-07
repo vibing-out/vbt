@@ -102,8 +102,19 @@ test("each /record download matches GET /api/record/{scope}/{stage} exactly @smo
   }
 });
 
+const hasProductDb = !!process.env.NEXT_PUBLIC_SUPABASE_URL && !!process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+
+test("an unknown stage is a 404 from the real route @smoke", async ({ request }) => {
+  // Rejected before any database read, so this holds with or without database env.
+  const response = await request.get("/api/record/18097/NOT_A_STAGE");
+  expect(response.status()).toBe(404);
+  expect(await response.json()).toEqual({ error: "not_found" });
+});
+
 test("an unpublished record is a 404 from the real route @smoke", async ({ request }) => {
+  // Without database env the route answers 500 server_misconfigured, so this needs the database.
+  test.skip(!hasProductDb, "product DB env not set");
   const response = await request.get("/api/record/no-such-scope/CERTIFIED");
   expect(response.status()).toBe(404);
-  expect(await response.json()).toEqual({ error: "not_found", message: "No record is published for this stage yet." });
+  expect(await response.json()).toEqual({ error: "not_found" });
 });

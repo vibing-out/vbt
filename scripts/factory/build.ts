@@ -253,6 +253,7 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
     return run
   }
 
+  let pr = 0 // the ticket's pull request, once opened
   try {
     // Wait for a slot, so at most MAX_PARALLEL_TICKETS Opus tickets share the subscription's limits.
     for (;;) {
@@ -346,7 +347,6 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
     let findings = ''
     let summary = ''
     let checks = ''
-    let pr = 0
     for (let round = 1; ; round++) {
       // Implement (or fix), with one retry when lint, type check or tests fail.
       for (let attempt = 1; ; attempt++) {
@@ -435,6 +435,14 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
     return 'merged'
   } catch (err) {
     if (err instanceof Stop) return 'needs-human'
+    // Every ticket ends merged or with needs-human, as with the Warp Foreman: an unexpected failure (a GitHub
+    // error, a crashed command) is reported on the ticket and its pull request, then still fails the job.
+    const message = err instanceof Error ? err.message : String(err)
+    try {
+      await stopForHuman(pr ? [number, pr] : [number], `the runner failed:\n\n\`\`\`text\n${message.slice(0, 3000)}\n\`\`\``)
+    } catch (reported) {
+      if (!(reported instanceof Stop)) log(`#${number}: could not report the failure: ${reported instanceof Error ? reported.message : reported}`)
+    }
     throw err
   }
 }

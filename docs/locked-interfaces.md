@@ -121,6 +121,7 @@ Table `ballot_events`, insert-only:
 | `ballot_events` | As above |
 | `batches` | id, scope (precinct or county), from_status, to_status, actor_id, created_at, ballot_count |
 | `stage_records` | id, scope, stage, merkle_root, ballot_count, totals (aggregate only), published_at, signature |
+| `ingest_files` (T-05) | id, sha256 (unique; SHA-256 of the uploaded file's exact bytes), kind, actor_id (uploading official), recorded_at, ballot_count. Insert-only, in the `private` schema, readable by service_role only; never exposed publicly. Added with Austin's approval on [#15](https://github.com/vibing-out/vbt/issues/15#issuecomment-6711512134) |
 | `machine_log_imports` (private, T-10) | id, machine_id, precinct_id, county_id, election_id, format (cdf-json or cdf-xml), file_sha256, ballots_counted, polls_opened, polls_closed, error_count, unmapped_codes, uploaded_by (auth user id), imported_at |
 | `official_results` (private, T-10) | id, scope (precinct or county), scope_id, county_id, stage (TALLIED_PRECINCT, REPORTED_UNOFFICIAL or CERTIFIED), nist_status, totals (aggregate only), ballot_count, file_sha256, uploaded_by (auth user id), imported_at |
 | `check_results` (private, T-10) | id, check_id (C1 to C4), scope (machine, precinct or county), scope_id, stage, passed, failure, mismatches (ids and counts only), batch_id, created_at |

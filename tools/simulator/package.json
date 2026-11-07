@@ -1,0 +1,25 @@
+{
+  "name": "simulator",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "bin": {
+    "simulate": "./bin/simulate.mjs"
+  },
+  "scripts": {
+    "simulate": "node bin/simulate.mjs",
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "simulator": "link:.",
+    "tsx": "^4.20.0",
+    "typescript": "5.9.3",
+    "vitest": "5.1.0"
+  }
+}

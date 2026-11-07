@@ -7,10 +7,17 @@ import "server-only";
 //
 // Returns null for an unknown code and for any failure alike, so the caller can't tell them apart.
 // Never logs the code.
-import { type BallotStatus, isBallotStatus, isTerminal, publicLabel } from "@vbt/domain";
+import {
+  type BallotStatus,
+  isBallotStatus,
+  isTerminal,
+  orderByChain,
+  PUBLISHED_STAGES,
+  type PublicEvent,
+  publicLabel,
+} from "@vbt/domain";
 import { isIsoDate, toIndianaDate } from "./dates";
 import { defaultIntegrity, type IntegrityChecker, type RecordReader, safeCheck, type StageRecordRef } from "./integrity";
-import { orderByChain, type PublicEvent } from "./timeline";
 import type { TrackResult, TrackStage, TrackTimelineEntry } from "./types";
 
 export interface LookupDeps {
@@ -20,8 +27,6 @@ export interface LookupDeps {
   records?: RecordReader;
 }
 
-/** Stages that publish a stage record (locked state machine, "Batch" column). */
-const PUBLISHED_STAGES: readonly BallotStatus[] = ["TALLIED_PRECINCT", "REPORTED_UNOFFICIAL", "CERTIFIED"];
 const STAGE_RANK = new Map(PUBLISHED_STAGES.map((s, i) => [s, i]));
 
 class LookupFailed extends Error {}

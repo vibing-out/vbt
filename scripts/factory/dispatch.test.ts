@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  check, contextComment, refreshContext, refreshTargets, resume, resumeSkipReason, epicReady, epicReadyMessage, landed, notify, readiness, restGitHub, slackMessage, slackText, ticketNumber, trimmed, unblock, webhookUrl,
+  check, contextCheck, contextComment, refreshContext, refreshTargets, resume, resumeSkipReason, epicReady, epicReadyMessage, landed, notify, readiness, restGitHub, slackMessage, slackText, ticketNumber, trimmed, unblock, webhookUrl,
   type Actor, type Blocker, type EpicPull, type GitHub, type Issue, type IssueRef, type LabelNotice, type Pull,
 } from './dispatch.ts'
 
@@ -385,6 +385,27 @@ describe('context refresh', () => {
       'GET /issues/13/comments?per_page=100&page=1',
       'POST /issues/13/comments',
     ])
+  })
+})
+
+describe('contextCheck', () => {
+  const body = (n: number): string => `Ticket: #${n}\n\n\`\`\`context-log\n{"version":1,"decisions":[],"corrections":[]}\n\`\`\``
+  const pull = (overrides: Partial<Pull> = {}): Pull => ({
+    number: 46, url: 'https://github.com/vibing-out/vbt/pull/46', merged: false, base: 'epic/2', body: body(12), mergeCommit: null, ...overrides,
+  })
+  const run = (issue: Issue, pr: Pull): Promise<void> => contextCheck(pr.number, { github: fakeGitHub([issue], pr), context: async () => 'ok', log: silent })
+
+  it('passes an open epic pull request whose ticket is open', async () => {
+    await expect(run(ticket(), pull())).resolves.toBeUndefined()
+  })
+  it('fails an open epic pull request whose ticket is already closed, naming the follow-up ticket fix', async () => {
+    await expect(run(ticket({ state: 'CLOSED' }), pull())).rejects.toThrow(/Ticket #12 \(T-04 Schema\) is already closed.*follow-up ticket.*blocked by #12/)
+  })
+  it('passes a merged pull request, whose ticket `landed` closed', async () => {
+    await expect(run(ticket({ state: 'CLOSED' }), pull({ merged: true }))).resolves.toBeUndefined()
+  })
+  it('does not look up a ticket for a pull request into main', async () => {
+    await expect(run(ticket({ state: 'CLOSED' }), pull({ base: 'main', body: body(99) }))).resolves.toBeUndefined()
   })
 })
 

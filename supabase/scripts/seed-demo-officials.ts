@@ -1,7 +1,8 @@
 // Creates the three T-20 demo officials (poll worker, county, state) in a Supabase project, grants each
 // its official_roles row, and enrolls a TOTP factor for each. A human runs it once per project; CI never
-// does. It prints the passwords and TOTP secrets it creates, once, to this terminal: store them as
-// Vercel and Warp secrets (DEMO_* names in .env.example). It never writes them to a file.
+// does. It writes the passwords and TOTP secrets it creates to `.env.demo-officials.local` at the repo
+// root (git-ignored by `.env*.local`, mode 600) and prints only that path, never a secret: store them as
+// Vercel and Warp secrets (DEMO_* names in .env.example), then delete the file.
 //
 // Usage (from supabase/):
 //   node scripts/seed-demo-officials.ts --yes [--precinct 18097-001] [--county 18097]
@@ -12,7 +13,7 @@
 // Re-running is safe: an existing user keeps its account, and a user that already has a verified TOTP
 // factor keeps it (its secret is not printed again). Delete the factor in the dashboard to re-enroll.
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
+import { chmodSync, existsSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import * as OTPAuth from "otpauth";
@@ -78,8 +79,8 @@ export function totpCode(secret: string, timestamp = Date.now()): string {
 }
 
 /**
- * Seeds every account. Writes only to `print` (the human's terminal): KEY=value lines for the secrets
- * to store, and notes. Returns nothing, so no caller can persist the secrets by accident.
+ * Seeds every account. Writes only to `print`: KEY=value lines for the secrets to store, and notes.
+ * `main` sends them to the git-ignored credentials file (see the header), never to the terminal.
  */
 export async function seedDemoOfficials(
   accounts: readonly DemoAccount[],
@@ -195,6 +196,9 @@ export function supabaseOps(url: string, publishableKey: string, secretKey: stri
   };
 }
 
+// Matched by `.env*.local` in the repo's .gitignore, so the secrets can't be committed.
+export const CREDENTIALS_FILE = new URL("../../.env.demo-officials.local", import.meta.url);
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   if (process.env.CI) throw new Error("seed-demo-officials is run by a human, never in CI.");
@@ -214,8 +218,12 @@ async function main(): Promise<void> {
     console.log("Dry run. Re-run with --yes to create the accounts and enroll TOTP.");
     return;
   }
-  console.log("Store the KEY=value lines below as Vercel and Warp secrets now; they are not saved anywhere.\n");
-  await seedDemoOfficials(accounts, supabaseOps(url, publishableKey, secretKey), (line) => console.log(line));
+  const lines: string[] = [];
+  await seedDemoOfficials(accounts, supabaseOps(url, publishableKey, secretKey), (line) => lines.push(line));
+  writeFileSync(CREDENTIALS_FILE, `${lines.join("\n")}\n`, { mode: 0o600 });
+  chmodSync(CREDENTIALS_FILE, 0o600); // `mode` applies only when the file is created
+  console.log(`Wrote the demo credentials to ${fileURLToPath(CREDENTIALS_FILE)} (git-ignored, mode 600).`);
+  console.log("Store its KEY=value lines as Vercel and Warp secrets, then delete the file.");
 }
 
 // Run only as a script, never on import (the tests import the flow).

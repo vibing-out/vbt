@@ -8,6 +8,7 @@
 
 import { isBallotStatus } from "@vbt/domain";
 import { ApiError, type ApiPort, type ExportFile, type Mismatch, type SetBallot, type TrackView } from "./ports.ts";
+import { trimTrailingSlashes } from "./url.ts";
 
 export interface HttpPortsOptions {
   /** The app's origin, e.g. https://www.ballottrack.org or the route's own origin. */
@@ -39,7 +40,7 @@ const status = (value: unknown) => {
 
 export function httpPorts(options: HttpPortsOptions): ApiPort {
   const doFetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
-  const base = options.baseUrl.replace(/\/+$/, "");
+  const base = trimTrailingSlashes(options.baseUrl);
   const bypass: Record<string, string> = options.bypassSecret ? { "x-vercel-protection-bypass": options.bypassSecret } : {};
 
   const send = async (url: string, init: RequestInit & { headers?: Record<string, string> }): Promise<unknown> => {
@@ -96,7 +97,7 @@ export function httpPorts(options: HttpPortsOptions): ApiPort {
       return { status: status(body.status), reason: typeof body.reason === "string" ? body.reason : null };
     },
     async readSet(precinctId): Promise<SetBallot[]> {
-      const url = new URL(`${options.supabaseUrl.replace(/\/+$/, "")}/rest/v1/ballot_public`);
+      const url = new URL(`${trimTrailingSlashes(options.supabaseUrl)}/rest/v1/ballot_public`);
       url.searchParams.set("select", "tracking_code,current_status,cast_date");
       url.searchParams.set("precinct_id", `eq.${precinctId}`);
       const rows = await doFetch(url.toString(), {

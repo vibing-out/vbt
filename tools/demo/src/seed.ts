@@ -20,6 +20,7 @@ import {
   newSetId,
   type RandomBytes,
 } from "./set-id.ts";
+import { trimTrailingSlashes } from "./url.ts";
 
 /** The production tracker; each receipt's QR code opens `<this>/track/<code>` (ticket AC 2). */
 export const TRACKER_BASE_URL = "https://www.ballottrack.org";
@@ -28,12 +29,12 @@ export const DEMO_ELECTION_NAME = "General Election";
 
 /** The URL a receipt's QR code opens. */
 export function trackerUrl(trackingCode: string, baseUrl = TRACKER_BASE_URL): string {
-  return `${baseUrl.replace(/\/+$/, "")}/track/${encodeURIComponent(trackingCode)}`;
+  return `${trimTrailingSlashes(baseUrl)}/track/${encodeURIComponent(trackingCode)}`;
 }
 
 /** The Demo control page for a set. */
 export function controlUrl(setId: string, appBaseUrl: string): string {
-  return `${appBaseUrl.replace(/\/+$/, "")}/official/demo?set=${encodeURIComponent(setId)}`;
+  return `${trimTrailingSlashes(appBaseUrl)}/official/demo?set=${encodeURIComponent(setId)}`;
 }
 
 export interface SeedDeps {
@@ -63,11 +64,26 @@ export interface SeedResult {
   readonly files: readonly string[];
 }
 
+/**
+ * A uniform index in [0, bound) for bound <= 256. `byte % bound` would favor the low indexes whenever 256
+ * is not a multiple of bound, so this masks to the next power of two and redraws anything out of range.
+ */
+function uniformIndex(bound: number, random: RandomBytes): number {
+  if (!Number.isInteger(bound) || bound < 1 || bound > 256) throw new RangeError(`bound out of range: ${bound}`);
+  let mask = 1;
+  while (mask < bound) mask <<= 1;
+  mask -= 1;
+  for (;;) {
+    const candidate = (random(1)[0] ?? 0) & mask;
+    if (candidate < bound) return candidate;
+  }
+}
+
+/** A Fisher-Yates shuffle with unbiased indexes. */
 function shuffled<T>(items: readonly T[], random: RandomBytes): T[] {
   const out = [...items];
-  const bytes = random(out.length);
   for (let i = out.length - 1; i > 0; i--) {
-    const j = (bytes[i] ?? 0) % (i + 1);
+    const j = uniformIndex(i + 1, random);
     [out[i], out[j]] = [out[j] as T, out[i] as T];
   }
   return out;

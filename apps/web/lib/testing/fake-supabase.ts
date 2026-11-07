@@ -6,6 +6,8 @@
 
 export const SUPABASE_URL = "https://demo.supabase.co";
 export const PUBLISHABLE_KEY = "sb_publishable_test";
+/** The service_role key the T-05 routes write with (SUPABASE_SECRET_KEY). */
+export const SECRET_KEY = "sb_secret_test";
 export const ENV = { NEXT_PUBLIC_SUPABASE_URL: SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: PUBLISHABLE_KEY };
 /** @supabase/ssr's cookie name for SUPABASE_URL: sb-<first host label>-auth-token. */
 export const AUTH_COOKIE = "sb-demo-auth-token";
@@ -23,12 +25,24 @@ export const GRANTS: Record<string, unknown> = {
   [USERS.state]: { role: "state", scope: null, scope_id: null },
 };
 
-// supabase/seed.sql precincts.
+// supabase/seed.sql precincts and machines.
 export const PRECINCTS = [
   { id: "18097-001", county_id: "18097" },
   { id: "18097-002", county_id: "18097" },
   { id: "18057-001", county_id: "18057" },
 ];
+export const MACHINES = [
+  { id: "M-18097-001-A", precinct_id: "18097-001" },
+  { id: "M-18097-002-A", precinct_id: "18097-002" },
+  { id: "M-18057-001-A", precinct_id: "18057-001" },
+];
+
+/** PostgREST `in.(a,b,"c d")` filter values. */
+function inList(param: string | null): string[] | null {
+  const match = /^in\.\((.*)\)$/.exec(param ?? "");
+  if (!match) return null;
+  return (match[1] ?? "").split(",").filter((v) => v !== "").map((v) => v.replace(/^"(.*)"$/, "$1"));
+}
 
 const KID = "test-signing-key";
 const ALGORITHM = { name: "ECDSA", namedCurve: "P-256" } as const;
@@ -123,6 +137,13 @@ export interface FakeSupabaseOptions {
   userStatus?: number;
   /** Throw (a network failure) for requests whose path matches. */
   networkFailure?: RegExp;
+  /** T-05: answers POST /rest/v1/rpc/<name> made with SECRET_KEY (default: 404). */
+  rpc?: (name: string, args: Record<string, unknown>) => Response | Promise<Response>;
+}
+
+export interface RpcCall {
+  name: string;
+  args: Record<string, unknown>;
 }
 
 export interface FakeRequest {
@@ -134,12 +155,24 @@ export interface FakeRequest {
 /** A fetch that plays the Supabase project. `requests` records every call. */
 export function fakeSupabase(options: FakeSupabaseOptions = {}) {
   const requests: FakeRequest[] = [];
+  const rpcCalls: RpcCall[] = [];
   const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const request = new Request(input, init);
     const url = new URL(request.url);
     requests.push({ url, method: request.method, headers: request.headers });
     if (options.networkFailure?.test(url.pathname)) throw new TypeError("fetch failed");
     if (url.origin !== SUPABASE_URL) return new Response("unexpected host", { status: 599 });
+
+    if (url.pathname.startsWith("/rest/v1/rpc/")) {
+      // Only service_role may execute the T-05 RPCs (supabase/migrations/20261107220000_ingest_and_batches.sql).
+      if (request.headers.get("apikey") !== SECRET_KEY) {
+        return Response.json({ code: "42501", message: "permission denied for function" }, { status: 401 });
+      }
+      const name = url.pathname.slice("/rest/v1/rpc/".length);
+      const args = (await request.json()) as Record<string, unknown>;
+      rpcCalls.push({ name, args });
+      return options.rpc ? options.rpc(name, args) : Response.json({ message: "no such function" }, { status: 404 });
+    }
 
     switch (url.pathname) {
       case "/auth/v1/.well-known/jwks.json":
@@ -177,14 +210,20 @@ export function fakeSupabase(options: FakeSupabaseOptions = {}) {
         if (options.precinctsStatus && options.precinctsStatus !== 200) {
           return Response.json({ message: "boom" }, { status: options.precinctsStatus });
         }
+        const ids = inList(url.searchParams.get("id"));
+        if (ids) return Response.json(PRECINCTS.filter((p) => ids.includes(p.id)));
         const id = url.searchParams.get("id")?.replace(/^eq\./, "");
         const county = url.searchParams.get("county_id")?.replace(/^eq\./, "");
         const rows = PRECINCTS.filter((p) => (id === undefined || p.id === id) && (county === undefined || p.county_id === county));
         return Response.json(rows.slice(0, 1).map(({ county_id }) => ({ county_id })));
       }
+      case "/rest/v1/machines": {
+        const ids = inList(url.searchParams.get("id")) ?? [];
+        return Response.json(MACHINES.filter((m) => ids.includes(m.id)));
+      }
       default:
         return new Response("not found", { status: 404 });
     }
   };
-  return { fetch: fetchImpl as typeof fetch, requests };
+  return { fetch: fetchImpl as typeof fetch, requests, rpcCalls };
 }

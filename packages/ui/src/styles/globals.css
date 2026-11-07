@@ -1,0 +1,20 @@
+/* VBT global styles: Tailwind v4, the generated design tokens, and the print rules.
+   Apps import this once (apps/web/app/layout.tsx imports "@vbt/ui/globals.css"). */
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "./tokens.css";
+@import "./print.css";
+
+/* Scan the component sources and every app for class names. */
+@source "../**/*.{ts,tsx}";
+@source "../../../../apps/**/*.{ts,tsx}";
+
+@layer base {
+  body {
+    @apply bg-surface text-ink font-sans antialiased;
+  }
+
+  :focus-visible {
+    outline-color: var(--color-focus);
+  }
+}

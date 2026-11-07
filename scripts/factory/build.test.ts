@@ -193,6 +193,7 @@ function world(answers: Partial<Record<Stage, string[]>>, opts: { checksFail?: b
     writeFile: async (path) => void calls.push(`write ${path}`),
     notify: async () => void calls.push('notify'),
     landed: async (pr) => void calls.push(`landed ${pr}`),
+    rollup: async (epic) => void calls.push(`rollup ${epic}`),
     runUrl: 'https://github.com/vibing-out/vbt/actions/runs/7',
     runId: 7,
     sleep: async () => {},
@@ -246,6 +247,15 @@ describe('build', () => {
     const w = world({}, { inFlight: '34' })
     expect(await build(32, w.deps)).toBe('skipped')
     expect(w.calls.some((c) => c.startsWith('claude'))).toBe(false)
+  })
+
+  it('writes the roll-up right after opening the epic pull request', async () => {
+    const w = world({ triage: ['Needs a credential.\nVERDICT: needs-human'] })
+    w.deps.github.epicPull = async () => null
+    await build(32, w.deps)
+    const opened = w.calls.findIndex((c) => c.startsWith('gh pr create') && c.includes('--label epic'))
+    expect(opened).toBeGreaterThan(-1)
+    expect(w.calls[opened + 1]).toBe('rollup 4')
   })
 
   it('sends review fixes back to implement, then merges once review is clean', async () => {

@@ -18,7 +18,7 @@
 import { spawn } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { landed, notify, restGitHub, runContext, ticketId, type Deps as DispatchDeps, type GitHub, type Issue } from './dispatch.ts'
+import { landed, notify, refreshRollup, restGitHub, runContext, ticketId, type Deps as DispatchDeps, type GitHub, type Issue } from './dispatch.ts'
 import { check as checkReport, render as renderReport } from './report.ts'
 
 export const STAGES = ['triage', 'spec', 'implement', 'review'] as const
@@ -200,10 +200,11 @@ export type BuildDeps = {
   github: GitHub
   exec: Exec
   prompt: (stage: Stage) => Promise<string>
-  // dispatch.ts `notify` and `landed`, run in-process (see the header).
+  // dispatch.ts `notify`, `landed` and `rollup`, run in-process (see the header).
   writeFile: (path: string, text: string) => Promise<void>
   notify: (issue: number) => Promise<unknown>
   landed: (pr: number) => Promise<void>
+  rollup: (epic: number) => Promise<unknown>
   runUrl: string
   runId: number
   sleep: (ms: number) => Promise<void>
@@ -307,8 +308,11 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
     }
     const ahead = Number(await ok('git', ['rev-list', '--count', `origin/main..origin/${epicBranch}`]))
     if (ahead > 0 && !(await github.epicPull(epic.number))) {
-      const body = `Closes #${epic.number}\n\nThe roll-up is written before this is marked ready.\n\n\`\`\`context-log\n{"version": 1, "decisions": [], "corrections": []}\n\`\`\``
+      // A placeholder for a moment: `rollup` replaces it with the full description right away, and again at
+      // every ticket landing.
+      const body = `Closes #${epic.number}\n\nThe description is being written by \`dispatch.ts rollup\`.\n\n\`\`\`context-log\n{"version": 1, "decisions": [], "corrections": []}\n\`\`\``
       await ok('gh', ['pr', 'create', '--draft', '--base', 'main', '--head', epicBranch, '--title', epic.title, '--label', 'epic', '--body-file', '-'], { input: body })
+      await deps.rollup(epic.number)
     }
 
     // The ticket's own working copy, so this checkout of main (and this script) never changes underneath.
@@ -488,6 +492,7 @@ if (import.meta.main) {
       writeFile: (path, text) => writeFile(path, text),
       notify: (issue) => notify(issue, dispatchDeps),
       landed: (pr) => landed(pr, dispatchDeps),
+      rollup: (epic) => refreshRollup(epic, dispatchDeps),
       runUrl: process.env.RUN_URL ?? '',
       runId: Number(process.env.GITHUB_RUN_ID ?? 0),
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),

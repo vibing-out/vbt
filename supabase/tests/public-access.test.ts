@@ -94,11 +94,13 @@ describeDb("the public cannot read event times", () => {
   test("the date is Indiana local, so a late-evening event keeps its election-day date", async () => {
     const { rows } = await asRoleSteps(db(), "postgres", [
       {
+        // Chained onto the ballot's CAST event: a second first event would fork the chain (T-05 C9).
         sql: `insert into private.ballot_events (ballot_id, precinct_id, county_id, event_type, actor_role, actor_id,
-                                         occurred_at, hash)
-              select id, precinct_id, '18097', 'MISMATCH_DETECTED', 'county', 'c-1',
-                     timestamptz '2026-11-04 03:30:00+00', 'h'
-              from private.ballots where tracking_code = 'SEED-0002'`,
+                                         occurred_at, prev_hash, hash)
+              select b.id, b.precinct_id, '18097', 'MISMATCH_DETECTED', 'county', 'c-1',
+                     timestamptz '2026-11-04 03:30:00+00', e.hash, 'h'
+              from private.ballots b join private.ballot_events e on e.ballot_id = b.id
+              where b.tracking_code = 'SEED-0002'`,
       },
       { sql: "set local role anon" },
       {

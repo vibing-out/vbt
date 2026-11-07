@@ -2,22 +2,27 @@
 // subcommand per event (see .github/workflows/factory.yml):
 //   node scripts/factory/dispatch.ts check <issue>         on `queued`: label factory-ready or blocked
 //   node scripts/factory/dispatch.ts landed <pr>           on a merge into epic/*: log, close, unblock
+//   node scripts/factory/dispatch.ts unblock <issue>       on an issue closing: re-check what it blocked
 //   node scripts/factory/dispatch.ts context-check <pr>    on epic/* pull requests: validate the body
 // Reads GITHUB_TOKEN and GITHUB_REPOSITORY (owner/name) from the environment. `check` and `landed`
 // call scripts/context.ts, which reads its own sign-in variables (see that file).
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
-const USAGE = 'usage: node dispatch.ts <check <issue> | landed <pr> | context-check <pr>>'
+const USAGE = 'usage: node dispatch.ts <check <issue> | landed <pr> | unblock <issue> | context-check <pr>>'
 const CONTEXT_TS = fileURLToPath(new URL('../context.ts', import.meta.url))
 const COMMENT_LIMIT = 60_000 // GitHub rejects comments over 65,536 characters
 
 // Shapes -----------------------------------------------------------------------------------------
 
 export type IssueRef = { number: number; title: string; state: 'OPEN' | 'CLOSED'; labels: string[] }
+// A blocker carries its own parent, because a blocker in another epic only counts once that epic
+// has merged into `main`.
+export type Blocker = IssueRef & { parent: IssueRef | null }
 export type Issue = IssueRef & {
   parent: (IssueRef & { subIssues: IssueRef[] }) | null
-  blockedBy: IssueRef[]
+  subIssues: IssueRef[]
+  blockedBy: Blocker[]
   blocking: IssueRef[]
 }
 export type Pull = { number: number; url: string; merged: boolean; base: string; body: string; mergeCommit: string | null }
@@ -45,12 +50,24 @@ export function skipReason(issue: Issue): string | null {
   return null
 }
 
-// A ticket is ready when its parent is an epic and every issue blocking it is closed.
+// Why a blocker still holds the ticket back, or null once it is satisfied. A closed blocker counts
+// when it has no epic parent, shares the ticket's epic, or its epic is closed (the epic pull request
+// merged into `main`). A ticket's branch comes from its own epic, which is cut from `main`, so work
+// from another epic is only visible once that epic is on `main`.
+export function blockerWait(blocker: Blocker, epicNumber: number): string | null {
+  if (blocker.state !== 'CLOSED') return `#${blocker.number}`
+  const epic = blocker.parent?.labels.includes('epic') ? blocker.parent : null
+  if (!epic || epic.number === epicNumber || epic.state === 'CLOSED') return null
+  return `#${blocker.number} (its epic #${epic.number} has not merged into main)`
+}
+
+// A ticket is ready when its parent is an epic and every blocker is satisfied (see blockerWait).
 export function readiness(issue: Issue): { ready: true } | { ready: false; reason: string } {
   if (!issue.parent) return { ready: false, reason: 'it has no parent epic' }
   if (!issue.parent.labels.includes('epic')) return { ready: false, reason: `its parent #${issue.parent.number} is not labeled epic` }
-  const open = issue.blockedBy.filter((b) => b.state !== 'CLOSED')
-  if (open.length) return { ready: false, reason: `blocked by ${open.map((b) => `#${b.number}`).join(', ')}` }
+  const epicNumber = issue.parent.number
+  const waiting = issue.blockedBy.map((b) => blockerWait(b, epicNumber)).filter((w) => w !== null)
+  if (waiting.length) return { ready: false, reason: `blocked by ${waiting.join(', ')}` }
   return { ready: true }
 }
 
@@ -155,14 +172,34 @@ export async function landed(number: number, deps: Deps): Promise<void> {
   }
   await github.close(ticket)
   log(`#${ticket}: closed by pull request #${number}`)
+  // In-process, because closing with GITHUB_TOKEN does not start the `issues: closed` workflow.
+  await unblock(ticket, deps)
+}
+
+// Open issues waiting on this one, labeled `blocked` (so they were queued and `check` held them).
+const waitingOn = (refs: IssueRef[]): IssueRef[] => refs.filter((r) => r.state === 'OPEN' && r.labels.includes('blocked'))
+
+// Re-checks every open `blocked` issue the closed issue was blocking. When it is an epic, also every
+// open `blocked` issue with a blocker inside that epic, since those waited for the epic to merge.
+export async function unblock(number: number, deps: Deps): Promise<void> {
+  const { github, log = console.log } = deps
+  const closed = await github.issue(number)
+  if (closed.state !== 'CLOSED') {
+    log(`#${number}: skipped unblock, it is still open`)
+    return
+  }
+  const targets = new Map(waitingOn(closed.blocking).map((r) => [r.number, r]))
+  if (closed.labels.includes('epic'))
+    for (const sub of closed.subIssues) for (const r of waitingOn((await github.issue(sub.number)).blocking)) targets.set(r.number, r)
   const failures: string[] = []
-  for (const b of issue.blocking.filter((b) => b.state === 'OPEN' && b.labels.includes('blocked'))) {
+  for (const t of targets.values()) {
     try {
-      await check(b.number, deps)
+      await check(t.number, deps)
     } catch (err) {
-      failures.push(`#${b.number}: ${err instanceof Error ? err.message : err}`)
+      failures.push(`#${t.number}: ${err instanceof Error ? err.message : err}`)
     }
   }
+  log(`#${number}: re-checked ${targets.size} issue(s)`)
   if (failures.length) throw new Error(`re-check failed for ${failures.join('; ')}`)
 }
 
@@ -180,7 +217,8 @@ const ISSUE_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
     issue(number: $number) {
       ...ref
       parent { ...ref subIssues(first: 100) { nodes { ...ref } } }
-      blockedBy(first: 100) { nodes { ...ref } }
+      subIssues(first: 100) { nodes { ...ref } }
+      blockedBy(first: 100) { nodes { ...ref parent { ...ref } } }
       blocking(first: 100) { nodes { ...ref } }
     }
   }
@@ -209,7 +247,18 @@ export function restGitHub(token: string, repository: string): GitHub {
   return {
     async issue(number) {
       const result = (await call('POST', '/graphql', { query: ISSUE_QUERY, variables: { owner, name, number } })) as {
-        data?: { repository: { issue: (RawRef & { parent: (RawRef & { subIssues: { nodes: RawRef[] } }) | null; blockedBy: { nodes: RawRef[] }; blocking: { nodes: RawRef[] } }) | null } }
+        data?: {
+          repository: {
+            issue:
+              | (RawRef & {
+                  parent: (RawRef & { subIssues: { nodes: RawRef[] } }) | null
+                  subIssues: { nodes: RawRef[] }
+                  blockedBy: { nodes: (RawRef & { parent: RawRef | null })[] }
+                  blocking: { nodes: RawRef[] }
+                })
+              | null
+          }
+        }
         errors?: { message: string }[]
       }
       if (result.errors?.length) throw new Error(`GraphQL: ${result.errors.map((e) => e.message).join('; ')}`)
@@ -218,7 +267,8 @@ export function restGitHub(token: string, repository: string): GitHub {
       return {
         ...ref(raw),
         parent: raw.parent && { ...ref(raw.parent), subIssues: raw.parent.subIssues.nodes.map(ref) },
-        blockedBy: raw.blockedBy.nodes.map(ref),
+        subIssues: raw.subIssues.nodes.map(ref),
+        blockedBy: raw.blockedBy.nodes.map((b) => ({ ...ref(b), parent: b.parent && ref(b.parent) })),
         blocking: raw.blocking.nodes.map(ref),
       }
     },
@@ -267,6 +317,7 @@ if (import.meta.main) {
     const deps: Deps = { github: restGitHub(token, process.env.GITHUB_REPOSITORY ?? 'vibing-out/vbt'), context: runContext }
     if (command === 'check') await check(Number(arg), deps)
     else if (command === 'landed') await landed(Number(arg), deps)
+    else if (command === 'unblock') await unblock(Number(arg), deps)
     else if (command === 'context-check') await contextCheck(Number(arg), deps)
     else throw new Error(USAGE)
   } catch (err) {

@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { check, contextComment, landed, readiness, ticketNumber, type GitHub, type Issue, type IssueRef, type Pull } from './dispatch.ts'
+import { check, contextComment, landed, readiness, ticketNumber, unblock, type Blocker, type GitHub, type Issue, type IssueRef, type Pull } from './dispatch.ts'
 
 const ref = (number: number, title: string, state: IssueRef['state'] = 'OPEN', labels: string[] = []): IssueRef => ({ number, title, state, labels })
 const epic = { ...ref(2, 'E1 Foundation', 'OPEN', ['epic']), subIssues: [ref(11, 'T-02 Domain'), ref(12, 'T-04 Schema'), ref(13, 'T-20 Auth')] }
+// A blocker in E1 (same epic as the default ticket) unless given another parent.
+const blocker = (number: number, title: string, state: IssueRef['state'] = 'OPEN', parent: IssueRef | null = ref(2, 'E1 Foundation', 'OPEN', ['epic'])): Blocker => ({
+  ...ref(number, title, state),
+  parent,
+})
 const ticket = (overrides: Partial<Issue> = {}): Issue => ({
   ...ref(12, 'T-04 Schema', 'OPEN', ['queued']),
   parent: epic,
+  subIssues: [],
   blockedBy: [],
   blocking: [],
   ...overrides,
@@ -50,11 +56,28 @@ describe('readiness', () => {
   it('is ready with an epic parent and no blockers', () => {
     expect(readiness(ticket())).toEqual({ ready: true })
   })
-  it('is ready when every blocker is closed', () => {
-    expect(readiness(ticket({ blockedBy: [ref(11, 'T-02', 'CLOSED'), ref(10, 'T-01', 'CLOSED')] }))).toEqual({ ready: true })
+  it('is ready when a closed blocker is in the same epic, even though the epic is open', () => {
+    expect(readiness(ticket({ blockedBy: [blocker(11, 'T-02', 'CLOSED')] }))).toEqual({ ready: true })
   })
-  it('is not ready while any blocker is open', () => {
-    expect(readiness(ticket({ blockedBy: [ref(11, 'T-02', 'CLOSED'), ref(10, 'T-01')] }))).toEqual({ ready: false, reason: 'blocked by #10' })
+  it('waits on a closed blocker in another epic that is still open', () => {
+    const e3Ticket = ticket({ parent: { ...ref(4, 'E3 App', 'OPEN', ['epic']), subIssues: [] }, blockedBy: [blocker(12, 'T-04', 'CLOSED')] })
+    expect(readiness(e3Ticket)).toEqual({ ready: false, reason: 'blocked by #12 (its epic #2 has not merged into main)' })
+  })
+  it('is ready when a closed blocker is in another epic that is closed', () => {
+    const e3Ticket = ticket({
+      parent: { ...ref(4, 'E3 App', 'OPEN', ['epic']), subIssues: [] },
+      blockedBy: [blocker(12, 'T-04', 'CLOSED', ref(2, 'E1 Foundation', 'CLOSED', ['epic']))],
+    })
+    expect(readiness(e3Ticket)).toEqual({ ready: true })
+  })
+  it('is ready when a closed blocker has no epic parent', () => {
+    expect(readiness(ticket({ blockedBy: [blocker(9, 'D-01 Decision', 'CLOSED', null)] }))).toEqual({ ready: true })
+  })
+  it('treats a closed blocker whose parent is not an epic as having no epic parent', () => {
+    expect(readiness(ticket({ blockedBy: [blocker(9, 'D-01 Decision', 'CLOSED', ref(8, 'Tracking', 'OPEN'))] }))).toEqual({ ready: true })
+  })
+  it('is not ready while any blocker is open, whatever its epic', () => {
+    expect(readiness(ticket({ blockedBy: [blocker(11, 'T-02', 'CLOSED'), blocker(10, 'T-01', 'OPEN', null)] }))).toEqual({ ready: false, reason: 'blocked by #10' })
   })
   it('is not ready without a parent', () => {
     expect(readiness(ticket({ parent: null })).ready).toBe(false)
@@ -87,7 +110,7 @@ describe('ticketNumber', () => {
 
 describe('check', () => {
   it('posts the context comment before adding factory-ready, then removes blocked', async () => {
-    const issue = ticket({ labels: ['queued', 'blocked'], blockedBy: [ref(11, 'T-02 Domain', 'CLOSED')] })
+    const issue = ticket({ labels: ['queued', 'blocked'], blockedBy: [blocker(11, 'T-02 Domain', 'CLOSED')] })
     const github = fakeGitHub([issue])
     const searched: string[] = []
     const result = await check(12, {
@@ -105,7 +128,7 @@ describe('check', () => {
     expect(searched).toEqual(['search --topic T-02 --limit 50', 'search --topic T-20 --limit 50'])
   })
   it('adds blocked and posts nothing while a blocker is open', async () => {
-    const github = fakeGitHub([ticket({ blockedBy: [ref(11, 'T-02 Domain')] })])
+    const github = fakeGitHub([ticket({ blockedBy: [blocker(11, 'T-02 Domain')] })])
     const result = await check(12, { github, context: async () => 'unused', log: silent })
     expect(result).toBe('blocked')
     expect(github.calls).toEqual(['label #12 +blocked'])
@@ -136,8 +159,8 @@ describe('landed', () => {
     mergeCommit: 'a'.repeat(40),
   }
   const setup = (): { github: ReturnType<typeof fakeGitHub> } => {
-    const t02 = { ...ref(11, 'T-02 Domain', 'OPEN', ['factory-ready']), parent: epic, blockedBy: [], blocking: [ref(12, 'T-04 Schema', 'OPEN', ['queued', 'blocked'])] }
-    const t04 = ticket({ labels: ['queued', 'blocked'], blockedBy: [ref(11, 'T-02 Domain')] })
+    const t02 = { ...ref(11, 'T-02 Domain', 'OPEN', ['factory-ready']), parent: epic, subIssues: [], blockedBy: [], blocking: [ref(12, 'T-04 Schema', 'OPEN', ['queued', 'blocked'])] }
+    const t04 = ticket({ labels: ['queued', 'blocked'], blockedBy: [blocker(11, 'T-02 Domain')] })
     return { github: fakeGitHub([t02, t04], pull) }
   }
 
@@ -173,6 +196,52 @@ describe('landed', () => {
   it('ignores pull requests that did not merge into an epic branch', async () => {
     const github = fakeGitHub([], { ...pull, base: 'main' })
     await landed(40, { github, context: async () => 'unused', log: silent })
+    expect(github.calls).toEqual([])
+  })
+})
+
+describe('unblock', () => {
+  // E1 (#2) holds T-02 (#11) and T-04 (#12). T-30 (#30) is in E3 and blocked by T-04; T-31 (#31) is in
+  // E3 and blocked by T-02 but not queued yet; T-05 (#14) is in E1 and blocked by T-04.
+  const e3 = { ...ref(4, 'E3 App', 'OPEN', ['epic']), subIssues: [ref(30, 'T-30 Screen'), ref(31, 'T-31 Menu')] }
+  const setup = (epicState: IssueRef['state']): ReturnType<typeof fakeGitHub> => {
+    const e1Ref = ref(2, 'E1 Foundation', epicState, ['epic'])
+    const e1: Issue = { ...e1Ref, parent: null, subIssues: [ref(11, 'T-02 Domain', 'CLOSED'), ref(12, 'T-04 Schema', 'CLOSED')], blockedBy: [], blocking: [] }
+    const t02: Issue = { ...ref(11, 'T-02 Domain', 'CLOSED'), parent: { ...e1Ref, subIssues: [] }, subIssues: [], blockedBy: [], blocking: [ref(31, 'T-31 Menu', 'OPEN', [])] }
+    const t04: Issue = {
+      ...ref(12, 'T-04 Schema', 'CLOSED'),
+      parent: { ...e1Ref, subIssues: [] },
+      subIssues: [],
+      blockedBy: [],
+      blocking: [ref(30, 'T-30 Screen', 'OPEN', ['queued', 'blocked']), ref(14, 'T-05 Seed', 'OPEN', ['queued', 'blocked'])],
+    }
+    const t30: Issue = { ...ref(30, 'T-30 Screen', 'OPEN', ['queued', 'blocked']), parent: e3, subIssues: [], blockedBy: [blocker(12, 'T-04 Schema', 'CLOSED', e1Ref)], blocking: [] }
+    const t05: Issue = { ...ref(14, 'T-05 Seed', 'OPEN', ['queued', 'blocked']), parent: { ...e1Ref, subIssues: [] }, subIssues: [], blockedBy: [blocker(12, 'T-04 Schema', 'CLOSED', e1Ref)], blocking: [] }
+    return fakeGitHub([e1, t02, t04, t30, t05])
+  }
+  const deps = (github: GitHub) => ({ github, context: async () => 'no entries', now: () => new Date('2026-11-07T12:00:00Z'), log: silent })
+
+  it('re-checks what a closed ticket was blocking, leaving the cross-epic one blocked while its epic is open', async () => {
+    const github = setup('OPEN')
+    await unblock(12, deps(github))
+    expect(github.calls).toEqual(['label #30 +blocked', 'comment #14 ## Context from earlier tickets', 'label #14 +factory-ready', 'label #14 -blocked'])
+  })
+  it('re-checks blocked issues waiting on any ticket in a closed epic, and only those', async () => {
+    const github = setup('CLOSED')
+    await unblock(2, deps(github))
+    // #31 is open but not blocked (never queued), so it is left alone.
+    expect(github.calls).toEqual([
+      'comment #30 ## Context from earlier tickets',
+      'label #30 +factory-ready',
+      'label #30 -blocked',
+      'comment #14 ## Context from earlier tickets',
+      'label #14 +factory-ready',
+      'label #14 -blocked',
+    ])
+  })
+  it('does nothing for an issue that is still open', async () => {
+    const github = setup('OPEN')
+    await unblock(2, deps(github))
     expect(github.calls).toEqual([])
   })
 })

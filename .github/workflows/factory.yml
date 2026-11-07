@@ -1,6 +1,7 @@
 # The factory's deterministic routing: each job runs one subcommand of scripts/factory/dispatch.ts.
 #   check          a ticket gets `queued`: post earlier context, then label factory-ready (Warp's trigger) or blocked
 #   landed         a pull request merges into epic/*: log its context-log block, close the ticket, re-check what it blocked
+#   unblock        an issue closes: re-check the blocked issues it held back (for an epic, those waiting on any of its tickets)
 #   context-check  a pull request into epic/* opens or changes: its body needs one valid context-log block (a required check)
 #
 # Repository secrets required (the factory-dispatch identity in the context log, see the vbt-context README):
@@ -14,7 +15,7 @@ name: Factory
 
 on:
   issues:
-    types: [labeled]
+    types: [labeled, closed]
   pull_request:
     types: [opened, edited, synchronize, closed]
     branches: ['epic/**']
@@ -69,6 +70,30 @@ jobs:
           CONTEXT_EMAIL: ${{ secrets.CONTEXT_EMAIL }}
           CONTEXT_PASSWORD: ${{ secrets.CONTEXT_PASSWORD }}
         run: node scripts/factory/dispatch.ts landed "$PR"
+
+  unblock:
+    # Closes made by GITHUB_TOKEN don't start workflows, so `landed` unblocks in-process; this covers the rest,
+    # chiefly an epic closing when its epic pull request merges into main.
+    if: github.event_name == 'issues' && github.event.action == 'closed'
+    concurrency:
+      group: factory-unblock-${{ github.event.issue.number }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          SUPABASE_URL: ${{ secrets.CONTEXT_SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.CONTEXT_SUPABASE_PUBLISHABLE_KEY }}
+          CONTEXT_EMAIL: ${{ secrets.CONTEXT_EMAIL }}
+          CONTEXT_PASSWORD: ${{ secrets.CONTEXT_PASSWORD }}
+        run: node scripts/factory/dispatch.ts unblock "$ISSUE"
 
   context-check:
     if: github.event_name == 'pull_request' && github.event.action != 'closed'

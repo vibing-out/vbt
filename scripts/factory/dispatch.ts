@@ -73,11 +73,10 @@ export interface GitHub {
   // Whether the pull request merges into its base without conflicts: false when it conflicts, null when
   // GitHub has not computed it yet (it does so lazily, after a push to either branch).
   mergeable(pull: EpicPull): Promise<boolean | null>
-  // Merges `main` into the pull request's branch when it is behind; false when it was already current.
-  updateBranch(pull: EpicPull): Promise<boolean>
   markReady(pull: EpicPull): Promise<void>
   // Starts a workflow_dispatch run of `.github/workflows/<file>` on `ref`. Dispatches made with GITHUB_TOKEN
-  // still start runs, unlike pushes, so this is how the epic branch's required checks run after update-branch.
+  // still start runs, unlike pushes, so this is how the epic branch's required checks run on a head that
+  // GITHUB_TOKEN merged.
   dispatchWorkflow(file: string, ref: string, inputs?: Record<string, string>): Promise<void>
   // Opens an issue as a sub-issue of `epic`, blocked by `blockedBy` when given; resolves to its number.
   createSubIssue(input: { title: string; body: string; epic: number; blockedBy?: number }): Promise<number>
@@ -425,15 +424,21 @@ async function openSync(epic: Issue, pull: EpicPull, deps: Deps): Promise<'in-fl
   const id = followupId('T-00', epic.subIssues.map((s) => s.title))
   const created = await github.createSubIssue({ title: `${id} ${syncTitle(epic.number)}`, body: syncBody(epic.number, pull), epic: epic.number })
   await github.addLabels(created, ['queued'])
-  await github.comment(pull.number, `This pull request conflicts with \`main\`. Opened #${created} to merge \`main\` into \`epic/${epic.number}\`.`)
   log(`epic #${epic.number}: #${pull.number} conflicts with main; opened sync ticket #${created} (${id})`)
+  // Dispatch first: a label added with GITHUB_TOKEN starts no workflow, so nothing else runs `check`, and a
+  // failure after this point must not leave the ticket queued but never dispatched (#78).
   await check(created, deps)
+  // A courtesy note on the epic pull request; failing to post it doesn't undo the dispatched ticket.
+  try {
+    await github.comment(pull.number, `This pull request conflicts with \`main\`. Opened #${created} to merge \`main\` into \`epic/${epic.number}\`.`)
+  } catch (err) {
+    log(`epic #${epic.number}: could not comment on #${pull.number}: ${err instanceof Error ? err.message : err}`)
+  }
   return 'opened'
 }
 
-// Once every ticket in the epic is closed, brings the epic pull request up to date with `main` (whose
-// ruleset requires it), dispatches its required checks on the new head, marks it ready for review,
-// comments and posts to Slack. First, at every landing, a conflict with `main` opens a sync ticket
+// Once every ticket in the epic is closed, dispatches the epic pull request's required checks, marks it
+// ready for review, comments and posts to Slack. First, at every landing, a conflict with `main` opens a sync ticket
 // (see syncEpic): the earlier the conflict is caught, the smaller it is. A pull request that is
 // already ready was handled by an earlier run, so nothing is repeated. Failures are logged, not thrown:
 // the ticket has already merged and closed, and a person can mark the pull request ready by hand.
@@ -459,24 +464,18 @@ export async function epicReady(
       log(`epic #${epicNumber}: pull request #${pull.number} is already ready for review`)
       return 'already-ready'
     }
-    let updated: boolean
-    try {
-      updated = await github.updateBranch(pull)
-    } catch (err) {
-      // GitHub may not have computed the conflict when syncEpic asked; update-branch then reports it.
-      if (!/conflict/i.test(err instanceof Error ? err.message : String(err))) throw err
-      await openSync(epic, pull, deps)
-      return 'conflict'
-    }
+    // A branch that is only behind `main` is marked ready as is: `main`'s ruleset does not require an
+    // up-to-date branch (strict status checks are off), and the `epic/**` ruleset rejects update-branch.
+    // If strict is ever turned back on, open a sync ticket here when the branch is behind (compare
+    // `epic/<k>...main`), the way syncEpic does for a conflict.
     // The required checks `check` (ci.yml) and `context-check` (factory.yml) must pass on the head commit.
-    // An update-branch push made with GITHUB_TOKEN starts neither, so both are dispatched on the branch.
-    // Dispatched even when the branch was already current: the head may still lack runs of its own.
+    // A head that GITHUB_TOKEN merged (a ticket or sync pull request) started neither, so both are dispatched.
     await github.dispatchWorkflow('ci.yml', pull.head)
     await github.dispatchWorkflow('factory.yml', pull.head, { pr: String(pull.number) })
     await github.markReady(pull)
     const name = epicId(epic.title) ?? `#${epicNumber}`
     await github.comment(pull.number, `All tickets in ${name} have merged. Ready for human approval into main.`)
-    log(`epic #${epicNumber}: pull request #${pull.number} ${updated ? 'updated from main and ' : ''}marked ready for review`)
+    log(`epic #${epicNumber}: pull request #${pull.number} marked ready for review`)
     if ((await postSlack(deps, async () => epicReadyMessage(pull, epic.title))) === 'posted')
       log(`epic #${epicNumber}: posted to Slack`)
     return 'ready'
@@ -812,13 +811,6 @@ export function restGitHub(
         if (raw.mergeable !== null) return raw.mergeable
       }
       return null
-    },
-    async updateBranch(pull) {
-      // How many commits `main` has that the epic branch lacks; the update call is only needed when any.
-      const compare = (await call('GET', `/repos/${owner}/${name}/compare/${pull.head}...main`)) as { ahead_by: number }
-      if (compare.ahead_by === 0) return false
-      await call('PUT', `/repos/${owner}/${name}/pulls/${pull.number}/update-branch`, {})
-      return true
     },
     async markReady(pull) {
       const result = (await call('POST', '/graphql', {

@@ -5,7 +5,7 @@
 #                  into main: log its context-log block only (setup work and epic roll-ups)
 #   unblock        an issue closes: re-check the blocked issues it held back (for an epic, those waiting on any of its tickets)
 #   context-check  a pull request into epic/* or main opens or changes: its body needs one valid context-log block
-#                  (a required check), and an epic/* one also needs one `Ticket: #n` line; `landed` also dispatches it
+#                  (a required check), and an epic/* one also needs one `Ticket: #n` line naming an open ticket; `landed` also dispatches it
 #                  (workflow_dispatch, input `pr`) after updating an epic branch, since that push starts no workflow
 #   notify         an issue gets `needs-human` (from a person or Warp's GitHub app): post it to the team Slack channel.
 #                  `landed` adds `needs-human` with GITHUB_TOKEN, which starts no workflow, so it posts in-process.

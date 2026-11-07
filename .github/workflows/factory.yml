@@ -1,13 +1,23 @@
 # The factory's deterministic routing: each job runs one subcommand of scripts/factory/dispatch.ts.
 #   check          a ticket gets `queued`: post earlier context, then label factory-ready (Warp's trigger) or blocked
-#   landed         a pull request merges into epic/*: log its context-log block, close the ticket, re-check what it blocked;
+#   landed         a pull request merges into epic/*: log its context-log block, close the ticket, re-check what it blocked,
+#                  and once the epic's last ticket closes, update the epic pull request from main and mark it ready;
 #                  into main: log its context-log block only (setup work and epic roll-ups)
 #   unblock        an issue closes: re-check the blocked issues it held back (for an epic, those waiting on any of its tickets)
 #   context-check  a pull request into epic/* or main opens or changes: its body needs one valid context-log block
-#                  (a required check), and an epic/* one also needs one `Ticket: #n` line
+#                  (a required check), and an epic/* one also needs one `Ticket: #n` line naming an open ticket; `landed` also dispatches it
+#                  (workflow_dispatch, input `pr`) after updating an epic branch, since that push starts no workflow
+#   notify         an issue gets `needs-human` (from a person or Warp's GitHub app): post it to the team Slack channel.
+#                  `landed` adds `needs-human` with GITHUB_TOKEN, which starts no workflow, so it posts in-process.
+#   sync-check     main moves (a push to main): each open epic pull request that now conflicts with main gets a
+#                  sync ticket, queued and checked in-process. `landed` runs the same check for its epic at every landing.
+#   resume         a person removes `needs-human` after answering on the issue: comment, drop factory-ready, and run
+#                  `check` in-process so a fresh Foreman run reads the answer. A bot's removal (the factory clears the
+#                  label itself after successful reviews) is skipped, judged by the actor type the script reads from the API.
 #
 # Repository secrets required (the factory-dispatch identity in the context log, see the vbt-context README):
 #   CONTEXT_SUPABASE_URL, CONTEXT_SUPABASE_PUBLISHABLE_KEY, CONTEXT_EMAIL, CONTEXT_PASSWORD
+# Optional: SLACK_WEBHOOK_URL, the team channel's Slack incoming webhook. Without it, notify logs and skips.
 #
 # Safety: only issue and pull request numbers reach `run:`, through env; titles and bodies are read by the
 # script from the API. Every job checks out the default branch, so a pull request can't change the script
@@ -17,10 +27,21 @@ name: Factory
 
 on:
   issues:
-    types: [labeled, closed]
+    types: [labeled, unlabeled, closed]
   pull_request:
     types: [opened, edited, synchronize, closed]
     branches: ['epic/**', 'main']
+  # Human merges into main start this; a conflict found now is smaller than one found when the epic finishes.
+  push:
+    branches: [main]
+  # Runs only `context-check`, for the pull request whose head is the dispatched branch. dispatch.ts landed
+  # starts it on epic/<n> after updating that branch with GITHUB_TOKEN, a push that starts no workflow.
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number to check
+        required: true
+        type: number
 
 permissions:
   issues: write
@@ -28,7 +49,7 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  dispatch-check:
     if: github.event_name == 'issues' && github.event.label.name == 'queued'
     # Per job, not per workflow: a workflow-level group would let an unrelated label event cancel a pending check.
     concurrency:
@@ -55,6 +76,14 @@ jobs:
     if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged
     concurrency:
       group: factory-landed-${{ github.event.pull_request.number }}
+    # Writes beyond the workflow default, for the epic pull request once its last ticket lands:
+    # contents to merge main into epic/<n> (update-branch), pull-requests to mark it ready for review,
+    # actions to dispatch ci.yml and factory.yml on the updated branch so its required checks run.
+    permissions:
+      issues: write
+      contents: write
+      pull-requests: write
+      actions: write
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -71,6 +100,7 @@ jobs:
           SUPABASE_PUBLISHABLE_KEY: ${{ secrets.CONTEXT_SUPABASE_PUBLISHABLE_KEY }}
           CONTEXT_EMAIL: ${{ secrets.CONTEXT_EMAIL }}
           CONTEXT_PASSWORD: ${{ secrets.CONTEXT_PASSWORD }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: node scripts/factory/dispatch.ts landed "$PR"
 
   unblock:
@@ -98,7 +128,7 @@ jobs:
         run: node scripts/factory/dispatch.ts unblock "$ISSUE"
 
   context-check:
-    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    if: (github.event_name == 'pull_request' && github.event.action != 'closed') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -110,5 +140,66 @@ jobs:
           node-version-file: .nvmrc
       - env:
           GITHUB_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
+          PR: ${{ github.event_name == 'workflow_dispatch' && inputs.pr || github.event.pull_request.number }}
         run: node scripts/factory/dispatch.ts context-check "$PR"
+
+  notify:
+    if: github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'needs-human'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: node scripts/factory/dispatch.ts notify "$ISSUE"
+
+  resume:
+    if: github.event_name == 'issues' && github.event.action == 'unlabeled' && github.event.label.name == 'needs-human'
+    concurrency:
+      group: factory-resume-${{ github.event.issue.number }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          SUPABASE_URL: ${{ secrets.CONTEXT_SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.CONTEXT_SUPABASE_PUBLISHABLE_KEY }}
+          CONTEXT_EMAIL: ${{ secrets.CONTEXT_EMAIL }}
+          CONTEXT_PASSWORD: ${{ secrets.CONTEXT_PASSWORD }}
+        run: node scripts/factory/dispatch.ts resume "$ISSUE"
+
+  sync-check:
+    if: github.event_name == 'push'
+    # One at a time, so two quick pushes to main can't open two sync tickets for the same epic.
+    concurrency:
+      group: factory-sync-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SUPABASE_URL: ${{ secrets.CONTEXT_SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.CONTEXT_SUPABASE_PUBLISHABLE_KEY }}
+          CONTEXT_EMAIL: ${{ secrets.CONTEXT_EMAIL }}
+          CONTEXT_PASSWORD: ${{ secrets.CONTEXT_PASSWORD }}
+        run: node scripts/factory/dispatch.ts sync-check

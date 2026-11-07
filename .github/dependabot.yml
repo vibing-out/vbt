@@ -1,0 +1,13 @@
+# Dependency vulnerability alerts and weekly update pull requests. Security updates are turned on in
+# repository settings; these pull requests go to main and need a human merge like any other change.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

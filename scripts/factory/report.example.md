@@ -8,7 +8,7 @@
 | context-log block lists every resolution | pass | 12 decisions and 4 corrections in the body; `node scripts/context.ts check` passes in the `context-check` job |
 
 ### Tests
-- CI `check` job on the head commit: lint pass, typecheck pass, `pnpm test`: ui 1 passed, domain 111 passed, scripts 30 passed, web 22 passed, supabase 176 passed, 0 failed.
+- CI `check` job on the head commit: lint pass, typecheck pass, `pnpm test`: ui 1 passed, domain 111 passed, scripts 30 passed, web 22 passed, supabase 176 passed, 0 failed; Playwright e2e 2 passed.
 - New or changed tests: 21 in `supabase/tests/public-surface.test.ts` (cast-order, private schema, grants, hash chain, `published_at`), 1 in `public-access.test.ts` (stage records readable only once published), 1 in `schema.test.ts` (no identity-like column in `public` or `private`).
 
 ### QA performed
@@ -35,6 +35,6 @@ none
 
 ### Summary
 - Closes T-04's public-surface gaps: no cast order, time or identity is readable by the public, and anyone can recompute the hash chain.
-- High confidence: each resolution maps to a migration line and a named test, and 340 tests passed in CI with 0 failures.
+- High confidence: each resolution maps to a migration line and a named test, and 340 unit and database tests plus 2 Playwright tests passed in CI with 0 failures.
 - Not exercised in a browser: no page reads these views yet, so the epic's verification should include one.
 - For the epic approver: Shawn confirms the CI workflow change (resolution 5), and the Indiana time zone stays for the demo (resolution 7).

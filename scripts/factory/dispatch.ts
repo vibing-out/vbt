@@ -153,7 +153,8 @@ export function ticketNumber(body: string): number {
 export function closedTicketError(ticket: IssueRef): string {
   return (
     `Ticket #${ticket.number} (${ticket.title}) is already closed, so this pull request would not show on its epic. ` +
-    `Open a follow-up ticket as a sub-issue of the same epic, blocked by #${ticket.number}, and put its number on the "Ticket:" line.`
+    `Open a follow-up ticket as a sub-issue of the same epic, blocked by #${ticket.number} ` +
+    `(node scripts/factory/dispatch.ts followup ${ticket.number} "<title>" < body.md), and put its number on the "Ticket:" line.`
   )
 }
 

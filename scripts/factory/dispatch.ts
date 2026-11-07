@@ -175,6 +175,14 @@ export function ticketNumber(body: string): number {
   return [...found][0] as number
 }
 
+// The epic's own issue is not a ticket: `landed` cannot ingest context into it and marks it needs-human.
+export function epicTicketError(ticket: IssueRef): string {
+  return (
+    `Ticket #${ticket.number} is an epic. Open a sync ticket (for example 'T-00<letter> Sync epic/<k> with main', ` +
+    `a sub-issue of the epic) and name that instead.`
+  )
+}
+
 // Work after a ticket closes needs a ticket of its own, so the epic's sub-issue list shows it.
 export function closedTicketError(ticket: IssueRef): string {
   return (
@@ -632,6 +640,7 @@ export async function contextCheck(number: number, deps: Deps): Promise<void> {
     // A merged pull request's ticket is closed by `landed`, so only open ones are held to this.
     if (!pr.merged) {
       const ticket = await github.issue(n)
+      if (ticket.labels.includes('epic')) throw new Error(epicTicketError(ticket))
       if (ticket.state === 'CLOSED') throw new Error(closedTicketError(ticket))
     }
   }

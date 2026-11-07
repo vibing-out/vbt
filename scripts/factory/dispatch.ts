@@ -149,6 +149,14 @@ export function ticketNumber(body: string): number {
   return [...found][0] as number
 }
 
+// Work after a ticket closes needs a ticket of its own, so the epic's sub-issue list shows it.
+export function closedTicketError(ticket: IssueRef): string {
+  return (
+    `Ticket #${ticket.number} (${ticket.title}) is already closed, so this pull request would not show on its epic. ` +
+    `Open a follow-up ticket as a sub-issue of the same epic, blocked by #${ticket.number}, and put its number on the "Ticket:" line.`
+  )
+}
+
 // Topics whose context a ticket should see: its blockers, then the epic's other tickets.
 export function contextTopics(issue: Issue): { topic: string; relation: string }[] {
   const seen = new Set<string>()
@@ -414,7 +422,14 @@ export async function unblock(number: number, deps: Deps): Promise<void> {
 export async function contextCheck(number: number, deps: Deps): Promise<void> {
   const { github, context, log = console.log } = deps
   const pr = await github.pull(number)
-  if (pr.base.startsWith('epic/')) ticketNumber(pr.body) // `landed` needs it, so the gate fails before the merge rather than after
+  if (pr.base.startsWith('epic/')) {
+    const n = ticketNumber(pr.body) // `landed` needs it, so the gate fails before the merge rather than after
+    // A merged pull request's ticket is closed by `landed`, so only open ones are held to this.
+    if (!pr.merged) {
+      const ticket = await github.issue(n)
+      if (ticket.state === 'CLOSED') throw new Error(closedTicketError(ticket))
+    }
+  }
   log(await context(['check'], pr.body))
 }
 

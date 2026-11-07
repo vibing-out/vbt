@@ -119,6 +119,7 @@ Table `ballot_events`, insert-only:
 | `ballot_events` | As above |
 | `batches` | id, scope (precinct or county), from_status, to_status, actor_id, created_at, ballot_count |
 | `stage_records` | id, scope, stage, merkle_root, ballot_count, totals (aggregate only), published_at, signature |
+| `ingest_files` (T-05) | id, sha256 (unique; SHA-256 of the uploaded file's exact bytes), kind, actor_id (uploading official), recorded_at, ballot_count. Insert-only, in the `private` schema, readable by service_role only; never exposed publicly. Added with Austin's approval on [#15](https://github.com/vibing-out/vbt/issues/15#issuecomment-6711512134) |
 | `uploads` (private, officials only; T-09, approved by Austin on #19) | id, file_sha256, kind, scope_id, uploaded_by, uploaded_at; RLS on, no anon/authenticated grants; `uploaded_at` never leaves the private schema |
 | sms_subscriptions (stretch, T-18) | id, tracking_code, phone_encrypted, language, created_at, expires_at (certification); deleted on STOP or certification; never exposed publicly or joined to ciphertext |
 

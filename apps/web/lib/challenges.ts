@@ -1,9 +1,9 @@
 import "server-only";
 
 import { isBallotStatus, officialMayActOn, transition } from "@vbt/domain";
-import { failure, type Outcome } from "./batches";
+import { failure, type Outcome } from "./official-batches";
 import type { Official } from "./require-role";
-import type { ServiceDb } from "./service-db";
+import type { ServiceDb } from "./official-db";
 
 // POST /api/challenges/{id}/resolve (T-09). {id} is the ballot id: a challenge is a ballot at CHALLENGED
 // (the locked data model has no challenges table). County and state officials resolve challenges in their

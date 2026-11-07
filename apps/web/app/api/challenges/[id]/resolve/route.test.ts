@@ -5,8 +5,8 @@ import { bearer } from "../../../../../lib/testing/requests";
 
 // T-09 AC4 and AC2: POST /api/challenges/{ballot id}/resolve.
 const state = vi.hoisted(() => ({ db: undefined as unknown }));
-vi.mock("../../../../../lib/service-db", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../../../../lib/service-db")>()),
+vi.mock("../../../../../lib/official-db", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../../../lib/official-db")>()),
   serviceDb: () => state.db,
 }));
 const { POST } = await import("./route");
@@ -87,7 +87,7 @@ test("a database refusal under the row lock is passed on (409), never a 500", as
   const ballot = challenged();
   const token = await aal2(USERS.county);
   fake.db.resolveChallenge = async () => {
-    const { DbError } = await import("../../../../../lib/service-db");
+    const { DbError } = await import("../../../../../lib/official-db");
     throw new DbError("ballot is not challenged", "VB409");
   };
   expect((await resolve(token, ballot.id, { decision: "accepted" })).status).toBe(409);

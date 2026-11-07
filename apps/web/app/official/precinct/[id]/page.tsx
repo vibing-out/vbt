@@ -1,6 +1,6 @@
 import { OFFICIAL_ROLES } from "@vbt/domain";
 import { requireOfficialPage } from "../../../../lib/page-guard";
-import { serviceDb } from "../../../../lib/service-db";
+import { serviceDb } from "../../../../lib/official-db";
 import { BatchForm } from "../../batch-form";
 import { Forbidden, OfficialNav, StatusCounts } from "../../ui";
 
@@ -28,10 +28,6 @@ export default async function PrecinctPage({ params }: { params: Promise<{ id: s
         to="TALLIED_PRECINCT"
         action="Tally the whole precinct"
         count={counts.CAST ?? 0}
-        files={[
-          { kind: "machine_log", label: "Machine event logs (one per machine)", multiple: true },
-          { kind: "precinct_totals", label: "Precinct totals" },
-        ]}
       />
       <p>
         <a href={`/official/mismatches?precinct=${encodeURIComponent(id)}`}>Mismatches in this precinct</a>

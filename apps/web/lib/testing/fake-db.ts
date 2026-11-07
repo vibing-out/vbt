@@ -13,8 +13,8 @@ import type {
   StageTotalsRow,
   UploadInput,
   UploadRow,
-} from "../service-db";
-import { DbError } from "../service-db";
+} from "../official-db";
+import { DbError } from "../official-db";
 import { fakeCiphertext } from "./fake-crypto";
 
 export const PRECINCT_COUNTY: Record<string, string> = { "18097-001": "18097", "18097-002": "18097", "18057-001": "18057" };

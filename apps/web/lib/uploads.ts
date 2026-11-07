@@ -1,10 +1,10 @@
 import "server-only";
 
 import type { OfficialTarget } from "@vbt/domain";
-import { failure, type Outcome } from "./batches";
-import { IngestError, isUploadKind, KIND_SCOPE, parseUpload } from "./ingest";
+import { failure, type Outcome } from "./official-batches";
+import { IngestError, isUploadKind, KIND_SCOPE, parseUpload } from "./ingest/index";
 import type { Official } from "./require-role";
-import type { ServiceDb } from "./service-db";
+import type { ServiceDb } from "./official-db";
 
 // POST /api/events (T-09): an official uploads one exported file (a machine event log, or precinct,
 // election-night or certified totals). It is parsed and checked, and its SHA-256 is recorded in

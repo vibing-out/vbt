@@ -75,5 +75,9 @@ test("only the adapter reads the election and stage-signing keys", () => {
     .filter((file) => !/\.test\.tsx?$/.test(file))
     .filter((file) => /(ELECTION_SECRET_KEY|STAGE_SIGNING_(SECRET|PUBLIC)_KEY)/.test(readFileSync(file, "utf8")))
     .map((file) => relative(WEB, file));
-  expect(readers).toEqual([join("lib", "crypto", "index.ts")]);
+  // T-05's lib/election.ts (E3) also loads the keys for POST /api/batches; collapsing the two readers
+  // into one is a follow-up after E3 and E4 are both on main.
+  expect(readers.sort()).toEqual(
+    [join("lib", "crypto", "index.ts"), join("lib", "election.ts"), join("lib", "testing", "election-fixtures.ts")].sort(),
+  );
 });

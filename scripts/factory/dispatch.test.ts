@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  check, contextCheck, contextComment, refreshContext, refreshTargets, resume, resumeSkipReason, epicReady, epicReadyMessage, landed, notify, readiness, restGitHub, slackMessage, slackText, ticketNumber, trimmed, unblock, webhookUrl,
+  check, contextCheck, isSyncTicket, syncCheck, syncTitle, contextComment, followup, followupId, ticketId, resume, resumeSkipReason, epicReady, epicReadyMessage, landed, notify, readiness, restGitHub, slackMessage, slackText, ticketNumber, trimmed, unblock, webhookUrl, refreshContext, refreshTargets,
   type Actor, type Blocker, type EpicPull, type GitHub, type Issue, type IssueRef, type LabelNotice, type Pull,
 } from './dispatch.ts'
 
@@ -27,11 +27,12 @@ function fakeGitHub(
   notice?: LabelNotice,
   epicPull: EpicPull | null = null,
   unlabeler: Actor | null = null,
-): GitHub & { calls: string[] } {
+): GitHub & { calls: string[]; mergeableState: boolean | null } {
   const calls: string[] = []
   const byNumber = new Map(issues.map((i) => [i.number, i]))
   return {
     calls,
+    mergeableState: true,
     async issue(n) {
       const found = byNumber.get(n)
       if (!found) throw new Error(`no issue ${n}`)
@@ -72,9 +73,12 @@ function fakeGitHub(
       calls.push(`find epic pull for #${n}`)
       return epicPull
     },
-    async updateBranch(p) {
-      calls.push(`update #${p.number}`)
-      return true
+    async openEpicPulls() {
+      calls.push('list epic pulls')
+      return epicPull ? [{ ...epicPull, epic: Number(epicPull.head.replace('epic/', '')) }] : []
+    },
+    async mergeable() {
+      return this.mergeableState
     },
     async markReady(p) {
       calls.push(`ready #${p.number}`)
@@ -82,6 +86,21 @@ function fakeGitHub(
     },
     async dispatchWorkflow(file, ref, inputs) {
       calls.push(`dispatch ${file} on ${ref}${inputs ? ` ${JSON.stringify(inputs)}` : ''}`)
+    },
+    async createSubIssue({ title, body, epic, blockedBy }) {
+      calls.push(`create "${title}" in #${epic}${blockedBy ? ` blocked by #${blockedBy}` : ''}: ${body.split('\n')[0]}`)
+      // Registered so a later `check` on it can read it, as GitHub would serve it.
+      const parent = byNumber.get(epic)
+      const created: Issue = {
+        ...ref(50, title),
+        parent: parent ? { ...ref(parent.number, parent.title, parent.state, parent.labels), subIssues: parent.subIssues } : null,
+        subIssues: [],
+        blockedBy: [],
+        blocking: [],
+      }
+      byNumber.set(50, created)
+      parent?.subIssues.push(ref(50, title))
+      return 50
     },
   }
 }
@@ -309,6 +328,29 @@ describe('landed', () => {
     }
     await expect(landed(40, { github, context, log: silent })).rejects.toThrow(/ingestion failed for pull request #40/)
     expect(github.calls).toEqual(['comment #40 Context ingestion failed for this pull request; log it by hand.'])
+  })
+})
+
+describe('follow-up tickets', () => {
+  it('reads a follow-up id from a title', () => {
+    expect(ticketId('T-04a Judgment fixes')).toBe('T-04a')
+    expect(ticketId('T-04 Schema')).toBe('T-04')
+  })
+  it('takes the first free letter, and continues the series from a follow-up', () => {
+    expect(followupId('T-04 Schema', ['T-02 Domain', 'T-04 Schema'])).toBe('T-04a')
+    expect(followupId('T-04 Schema', ['T-04 Schema', 'T-04a Fixes'])).toBe('T-04b')
+    expect(followupId('T-04a Fixes', ['T-04 Schema', 'T-04a Fixes'])).toBe('T-04b')
+  })
+  it('opens a sub-issue of the same epic, blocked by the original, then queues it', async () => {
+    const github = fakeGitHub([ticket({ state: 'CLOSED' })])
+    const created = await followup(12, ' Judgment fixes ', 'Fix the public views.', { github, context: async () => '', log: silent })
+    expect(created).toBe(50)
+    expect(github.calls).toEqual(['create "T-04a Judgment fixes" in #2 blocked by #12: Follow-up to #12 (T-04 Schema).', 'label #50 +queued'])
+  })
+  it('refuses a ticket with no parent epic', async () => {
+    const github = fakeGitHub([ticket({ parent: null })])
+    await expect(followup(12, 'Fixes', '', { github, context: async () => '', log: silent })).rejects.toThrow(/no parent epic/)
+    expect(github.calls).toEqual([])
   })
 })
 
@@ -615,7 +657,6 @@ describe('epicReady from landed', () => {
     expect(github.calls).toEqual([
       'close #11',
       'find epic pull for #2',
-      'update #39',
       'dispatch ci.yml on epic/2',
       'dispatch factory.yml on epic/2 {"pr":"39"}',
       'ready #39',
@@ -629,7 +670,8 @@ describe('epicReady from landed', () => {
   it('does nothing while a sibling ticket is still open', async () => {
     const { github, post, lines, deps } = setup('OPEN', epicPull())
     await landed(40, { ...deps, slackWebhook: webhook })
-    expect(github.calls).toEqual(['close #11'])
+    // The epic pull request is still read, to catch a conflict with main early.
+    expect(github.calls).toEqual(['close #11', 'find epic pull for #2'])
     expect(post).not.toHaveBeenCalled()
     expect(lines).toContain('epic #2: waiting on #12')
   })
@@ -664,17 +706,16 @@ describe('epicReady from landed', () => {
   })
   it('logs a failure without failing landed, since the ticket has already merged', async () => {
     const { github, lines, deps } = setup('CLOSED', epicPull())
-    github.updateBranch = async () => {
-      throw new Error('422 from PUT update-branch: merge conflict')
+    github.dispatchWorkflow = async () => {
+      throw new Error('502 from POST dispatches: bad gateway')
     }
     await expect(landed(40, deps)).resolves.toBeUndefined()
-    // Neither check is dispatched: the head is unchanged, so a dispatch would only re-test the old commit.
+    // Not marked ready: its required checks never started.
     expect(github.calls).toEqual(['close #11', 'find epic pull for #2'])
-    expect(lines).toContain('epic #2: readiness step failed: 422 from PUT update-branch: merge conflict')
+    expect(lines).toContain('epic #2: readiness step failed: 502 from POST dispatches: bad gateway')
   })
-  it('dispatches the checks even when the branch was already current with main', async () => {
+  it('dispatches the checks and marks ready without touching the epic branch, even when it is behind main', async () => {
     const { github, deps } = setup('CLOSED', epicPull(), 'CLOSED')
-    github.updateBranch = async () => false
     expect(await epicReady(2, deps)).toBe('ready')
     expect(github.calls.filter((c) => c.startsWith('dispatch'))).toEqual(['dispatch ci.yml on epic/2', 'dispatch factory.yml on epic/2 {"pr":"39"}'])
   })
@@ -698,5 +739,142 @@ describe('epicReady from landed', () => {
   })
   it('escapes the epic title in the Slack message', () => {
     expect(epicReadyMessage(epicPull(), 'E1 <@here> & co')).toBe('<!here> *<https://github.com/vibing-out/vbt/pull/39|E1 &lt;&gt; &amp; co>* is ready for approval into main')
+  })
+})
+
+describe('sync tickets for an epic that conflicts with main', () => {
+  // E1 (#2) holds T-02 (#11, just merged) and T-04 (#12, still open); epic pull request #39 is epic/2 into main.
+  const epicPull = (): EpicPull => ({ number: 39, url: 'https://github.com/vibing-out/vbt/pull/39', draft: true, nodeId: 'PR_39', head: 'epic/2' })
+  const setup = (siblings: IssueRef[] = [ref(12, 'T-04 Schema')], epicPr: EpicPull | null = epicPull()) => {
+    const e1: Issue = { ...ref(2, 'E1 Foundation', 'OPEN', ['epic']), parent: null, subIssues: [ref(11, 'T-02 Domain', 'CLOSED'), ...siblings], blockedBy: [], blocking: [] }
+    const github = fakeGitHub([e1], undefined, undefined, epicPr)
+    github.mergeableState = false
+    const lines: string[] = []
+    const deps = { github, context: async () => 'ok', log: (l: string) => lines.push(l) }
+    return { github, lines, deps }
+  }
+  const opened = [
+    'find epic pull for #2',
+    'create "T-00a Sync epic/2 with main" in #2: `main` and `epic/2` both changed the same lines, so epic pull request #39 conflicts and cannot merge.',
+    'label #50 +queued',
+    'context #50 ## Context from earlier tickets',
+    'label #50 +factory-ready',
+    'comment #39 This pull request conflicts with `main`. Opened #50 to merge `main` into `epic/2`.',
+  ]
+
+  it('recognizes only a T-00 sync title for the same epic', () => {
+    expect(isSyncTicket(`T-00a ${syncTitle(2)}`, 2)).toBe(true)
+    expect(isSyncTicket('T-00b Sync epic/2 with main', 2)).toBe(true)
+    expect(isSyncTicket('T-00a Sync epic/4 with main', 2)).toBe(false)
+    expect(isSyncTicket('T-04a Sync epic/2 with main', 2)).toBe(false)
+  })
+  it('opens, queues and dispatches a sync ticket at a landing, while other tickets are still open', async () => {
+    const { github, deps } = setup()
+    expect(await epicReady(2, deps)).toBe('conflict')
+    expect(github.calls).toEqual(opened)
+  })
+  it('still dispatches the sync ticket when commenting on the epic pull request is refused (#78)', async () => {
+    const { github, lines, deps } = setup()
+    const comment = github.comment.bind(github)
+    github.comment = async (n, body) => {
+      if (n === 39) throw new Error('403 from POST /issues/39/comments: Resource not accessible by integration')
+      return comment(n, body)
+    }
+    expect(await epicReady(2, deps)).toBe('conflict')
+    expect(github.calls).toEqual(opened.slice(0, -1))
+    expect(lines).toContain('epic #2: could not comment on #39: 403 from POST /issues/39/comments: Resource not accessible by integration')
+  })
+  it('opens no second sync ticket while one is open', async () => {
+    const { github, lines, deps } = setup([ref(12, 'T-04 Schema'), ref(57, 'T-00a Sync epic/2 with main')])
+    expect(await epicReady(2, deps)).toBe('conflict')
+    expect(github.calls).toEqual(['find epic pull for #2'])
+    expect(lines).toContain('epic #2: #39 conflicts with main; sync ticket #57 is already open')
+  })
+  it('takes the next letter after a closed sync ticket', async () => {
+    const { github, deps } = setup([ref(57, 'T-00a Sync epic/2 with main', 'CLOSED')])
+    expect(await epicReady(2, deps)).toBe('conflict')
+    expect(github.calls).toContain('label #50 +queued')
+    expect(github.calls.find((c) => c.startsWith('create'))).toMatch(/^create "T-00b Sync epic\/2 with main" in #2:/)
+  })
+  it('carries on without a ticket when GitHub has not computed mergeability yet', async () => {
+    const { github, lines, deps } = setup()
+    github.mergeableState = null
+    expect(await epicReady(2, deps)).toBe('waiting')
+    expect(github.calls).toEqual(['find epic pull for #2'])
+    expect(lines).toContain('epic #2: GitHub has not computed whether #39 conflicts; the next landed or push to main re-checks')
+  })
+  it('on a push to main, opens a sync ticket for a conflicting epic pull request', async () => {
+    const { github, lines, deps } = setup()
+    await syncCheck(deps)
+    expect(github.calls).toEqual(['list epic pulls', ...opened.slice(1)])
+    expect(lines).toContain('checked 1 epic pull request(s) for conflicts with main')
+  })
+  it('on a push to main, does nothing for an epic pull request that merges cleanly', async () => {
+    const { github, deps } = setup()
+    github.mergeableState = true
+    await syncCheck(deps)
+    expect(github.calls).toEqual(['list epic pulls'])
+  })
+  it('on a push to main, reports an epic that could not be checked', async () => {
+    const { github, deps } = setup()
+    github.mergeable = async () => {
+      throw new Error('502 from GET pulls/39')
+    }
+    await expect(syncCheck(deps)).rejects.toThrow('sync check failed for epic #2: 502 from GET pulls/39')
+  })
+})
+
+describe('restGitHub sync calls', () => {
+  const stub = (responses: unknown[]) => {
+    const urls: string[] = []
+    vi.stubGlobal('fetch', async (url: string | URL | Request, init?: RequestInit) => {
+      urls.push(`${init?.method} ${String(url).replace('https://api.github.com', '')}`)
+      return new Response(JSON.stringify(responses.shift() ?? {}), { status: 200 })
+    })
+    return urls
+  }
+  const pull: EpicPull = { number: 39, url: '', draft: true, nodeId: 'PR_39', head: 'epic/2' }
+  const sleeps: number[] = []
+  const github = () => restGitHub('token', 'vibing-out/vbt', { sleep: async (ms) => void sleeps.push(ms) })
+
+  it('polls mergeable until GitHub has computed it', async () => {
+    const urls = stub([{ mergeable: null }, { mergeable: null }, { mergeable: false }])
+    try {
+      expect(await github().mergeable(pull)).toBe(false)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(urls).toEqual(Array(3).fill('GET /repos/vibing-out/vbt/pulls/39'))
+  })
+  it('gives up as unknown after six polls', async () => {
+    const urls = stub(Array(10).fill({ mergeable: null }))
+    try {
+      expect(await github().mergeable(pull)).toBeNull()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(urls).toHaveLength(6)
+  })
+  it('lists only this repository\'s epic branches as epic pull requests', async () => {
+    const head = (ref: string, repo = 'vibing-out/vbt') => ({ ref, repo: { full_name: repo } })
+    stub([[
+      { number: 39, html_url: 'u39', draft: true, node_id: 'PR_39', head: head('epic/2') },
+      { number: 54, html_url: 'u54', draft: false, node_id: 'PR_54', head: head('factory/actions-runner') },
+      { number: 70, html_url: 'u70', draft: false, node_id: 'PR_70', head: head('epic/9', 'someone/fork') },
+    ]])
+    try {
+      expect(await github().openEpicPulls()).toEqual([{ number: 39, url: 'u39', draft: true, nodeId: 'PR_39', head: 'epic/2', epic: 2 }])
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+  it('creates a sub-issue without a dependency when nothing blocks it', async () => {
+    const urls = stub([{ id: 900, number: 60 }, {}])
+    try {
+      expect(await github().createSubIssue({ title: 'T-00a Sync epic/2 with main', body: 'b', epic: 2 })).toBe(60)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(urls).toEqual(['POST /repos/vibing-out/vbt/issues', 'POST /repos/vibing-out/vbt/issues/2/sub_issues'])
   })
 })

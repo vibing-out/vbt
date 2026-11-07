@@ -16,6 +16,13 @@ describe('check', () => {
     expect(check(openFix, 'review').verdict).toBe('fixes needed')
   })
 
+  it('treats an open "unambiguous fix" that needs no code change as an approver decision', () => {
+    // T-20's review round 4 (pull request #55): the only open "fix" was human operations.
+    const body = swap('1. [high, fixed] Base tables', '1. [medium, open] AC3 needs human operations; not a code fix. Base tables')
+    expect(check(body, 'review').verdict).toBe('approver decisions')
+    expect(check(swap('1. [high, fixed] Base tables', '1. [high, open] Base tables'), 'review').verdict).toBe('fixes needed')
+  })
+
   it('derives "approver decisions" from an open judgment call alone', () => {
     const body = swap('#### Judgment calls for a human\nnone', '#### Judgment calls for a human\n- [medium, open] Keep Indiana time for the demo?')
     expect(check(body, 'review')).toMatchObject({ errors: [], verdict: 'approver decisions' })

@@ -24,7 +24,7 @@ import { check as checkReport, render as renderReport } from './report.ts'
 export const STAGES = ['triage', 'spec', 'implement', 'review'] as const
 export type Stage = (typeof STAGES)[number]
 export type Verdict = 'clean' | 'fixes' | 'needs-human'
-export const MAX_REVIEW_ROUNDS = 4
+export const MAX_REVIEW_ROUNDS = 2
 export const MAX_PARALLEL_TICKETS = 2
 const NEEDS_HUMAN = 'needs-human'
 const WORKTREE = '/tmp/ticket'
@@ -36,7 +36,8 @@ const READ_ONLY = { allowed: 'Read,Grep,Glob,WebSearch,WebFetch', disallowed: 'E
 export const TOOLS: Record<Stage, { allowed: string; disallowed: string }> = {
   triage: READ_ONLY,
   spec: READ_ONLY,
-  review: READ_ONLY,
+  // Review also runs three focused passes as subagents (Task); they inherit the disallowed list, so stay read-only.
+  review: { allowed: `${READ_ONLY.allowed},Task`, disallowed: READ_ONLY.disallowed },
   implement: { allowed: 'Read,Edit,Write,Glob,Grep,Bash', disallowed: 'Bash(git push:*),Bash(git commit:*),Bash(gh:*)' },
 }
 
@@ -88,6 +89,11 @@ else echo "No CI run found for this commit." > /tmp/ci-tests.txt; fi
 gh api "repos/{owner}/{repo}/deployments?sha=$(git rev-parse HEAD)&per_page=1" --jq '.[0].statuses_url // empty' | xargs -r -I@ gh api @ --jq '[.[] | select(.state=="success")][0].environment_url // empty' > /tmp/preview-url.txt
 exit 0
 `
+
+// Claude Code's error output with anything token-shaped removed, safe to post on a public ticket.
+export function redacted(text: string): string {
+  return text.replace(/sk-ant-[A-Za-z0-9_-]+/g, 'sk-ant-[redacted]').trim().slice(-1500)
+}
 
 export type ClaudeRun = { text: string; modelsLine: string; costUsd: number | null }
 
@@ -241,12 +247,13 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
       ['-p', '--model', 'opus', '--effort', 'medium', '--allowedTools', t.allowed, '--disallowedTools', t.disallowed, '--output-format', 'json'],
       { input, cwd: WORKTREE },
     )
-    if (r.code !== 0 && !r.stdout.trim()) throw new Error(`claude ${stage} exited with ${r.code}: ${r.stderr.slice(-1500)}`)
+    if (r.code !== 0 && !r.stdout.trim()) throw new Error(`claude ${stage} exited with ${r.code}: ${redacted(r.stderr)}`)
     const run = parseClaude(r.stdout)
     log(`#${number} ${stage}: ${run.modelsLine} cost_usd_equivalent=${run.costUsd}`)
     return run
   }
 
+  let pr = 0 // the ticket's pull request, once opened
   try {
     // Wait for a slot, so at most MAX_PARALLEL_TICKETS Opus tickets share the subscription's limits.
     for (;;) {
@@ -268,6 +275,25 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
       await comment(number, `Already in flight in pull request #${inFlight.split('\n')[0]}; not starting another.`)
       return 'skipped'
     }
+    // Auth preflight: a trivial call answers "is the subscription token valid?" in seconds, before any stage runs.
+    const auth = await exec('claude', ['-p', 'Reply with exactly: OK', '--model', 'haiku', '--output-format', 'json'], { input: '' })
+    let authError = ''
+    if (auth.code !== 0 || !auth.stdout.trim()) authError = `exit ${auth.code}: ${redacted(auth.stderr || auth.stdout)}`
+    else {
+      try {
+        const r = JSON.parse(auth.stdout) as { is_error?: boolean; result?: string }
+        if (r.is_error) authError = redacted(r.result ?? 'is_error')
+      } catch {
+        authError = `unreadable output: ${redacted(auth.stdout)}`
+      }
+    }
+    if (authError) {
+      return await stopForHuman(
+        [number],
+        `Claude Code rejected the subscription token (repository secret CLAUDE_CODE_OAUTH_TOKEN). Re-create it with \`claude setup-token\` and set it again, then re-run.\n\n\`\`\`text\n${authError}\n\`\`\``,
+      )
+    }
+
     const epic = issue.parent
     if (!epic) return await stopForHuman([number], 'the ticket has no parent epic.')
     const epicBranch = `epic/${epic.number}`
@@ -321,7 +347,6 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
     let findings = ''
     let summary = ''
     let checks = ''
-    let pr = 0
     for (let round = 1; ; round++) {
       // Implement (or fix), with one retry when lint, type check or tests fail.
       for (let attempt = 1; ; attempt++) {
@@ -410,6 +435,14 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
     return 'merged'
   } catch (err) {
     if (err instanceof Stop) return 'needs-human'
+    // Every ticket ends merged or with needs-human, as with the Warp Foreman: an unexpected failure (a GitHub
+    // error, a crashed command) is reported on the ticket and its pull request, then still fails the job.
+    const message = err instanceof Error ? err.message : String(err)
+    try {
+      await stopForHuman(pr ? [number, pr] : [number], `the runner failed:\n\n\`\`\`text\n${message.slice(0, 3000)}\n\`\`\``)
+    } catch (reported) {
+      if (!(reported instanceof Stop)) log(`#${number}: could not report the failure: ${reported instanceof Error ? reported.message : reported}`)
+    }
     throw err
   }
 }
@@ -418,14 +451,23 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
 
 export const run: Exec = (command, args, options = {}) =>
   new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd: options.cwd ?? REPO_ROOT, stdio: ['pipe', 'pipe', 'pipe'] })
+    // No input means no stdin at all. With input, a child that exits without reading it (a fast-failing gh or
+    // git) closes the pipe early: the write's EPIPE is expected and the exit code says what happened, so it is
+    // swallowed rather than crashing the runner as an unhandled 'error' event.
+    const withInput = options.input !== undefined
+    const child = spawn(command, args, { cwd: options.cwd ?? REPO_ROOT, stdio: [withInput ? 'pipe' : 'ignore', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''
-    child.stdout.on('data', (chunk) => (stdout += chunk))
-    child.stderr.on('data', (chunk) => (stderr += chunk))
+    child.stdout?.on('data', (chunk) => (stdout += chunk))
+    child.stderr?.on('data', (chunk) => (stderr += chunk))
     child.on('error', reject)
     child.on('close', (code) => resolve({ code: code ?? 1, stdout, stderr }))
-    child.stdin.end(options.input ?? '')
+    if (child.stdin) {
+      child.stdin.on('error', (err: NodeJS.ErrnoException) => {
+        if (err.code !== 'EPIPE') reject(err)
+      })
+      child.stdin.end(options.input)
+    }
   })
 
 if (import.meta.main) {

@@ -21,6 +21,8 @@
 // judgment call (or an "unambiguous fix" that says it needs no code change) means "approver decisions",
 // otherwise "clean". A failed criterion must have an open finding.
 
+import { realpathSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
 export type Kind = 'review' | 'verify'
 type Section = { title: string; lines: string[] }
 type Finding = { group: string; severity: string; status: 'open' | 'fixed'; text: string }
@@ -228,7 +230,11 @@ async function stdin(): Promise<string> {
 
 const USAGE = 'usage: node report.ts <check <review|verify> | render <review|verify> --title <t> [--models <line>] [--run <url>] | summary> < file'
 
-if (import.meta.main) {
+// import.meta.main is missing on some Node versions, where the CLI would silently
+// do nothing and print an empty report (suspected in a Warp review run). Fall back to comparing paths.
+const isMain = import.meta.main ?? (process.argv[1] !== undefined && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)
+
+if (isMain) {
   const [command, kindArg, ...rest] = process.argv.slice(2)
   const kind = kindArg as Kind
   const needsKind = command === 'check' || command === 'render'

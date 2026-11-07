@@ -28,10 +28,6 @@ export default async function PrecinctPage({ params }: { params: Promise<{ id: s
         to="TALLIED_PRECINCT"
         action="Tally the whole precinct"
         count={counts.CAST ?? 0}
-        files={[
-          { kind: "machine_log", label: "Machine event logs (one per machine)", multiple: true },
-          { kind: "precinct_totals", label: "Precinct totals" },
-        ]}
       />
       <p>
         <a href={`/official/mismatches?precinct=${encodeURIComponent(id)}`}>Mismatches in this precinct</a>

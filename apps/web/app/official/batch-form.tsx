@@ -3,9 +3,8 @@
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
-// One-action batch with confirmation (T-09): the official picks the cross-check files, confirms the
-// number of ballots, and one POST /api/batches moves them all and publishes the stage record. The count
-// is sent as expected_count; if it changed on the server, the request is refused (409) and nothing moves.
+// One-action batch with confirmation (T-09): the official confirms the number of ballots, and one
+// POST /api/batches (T-05) moves them all and publishes the signed stage record.
 
 export interface BatchFormProps {
   scope: "precinct" | "county";
@@ -14,10 +13,9 @@ export interface BatchFormProps {
   to: string;
   action: string;
   count: number;
-  files: ReadonlyArray<{ kind: string; label: string; multiple?: boolean }>;
 }
 
-export function BatchForm({ scope, scopeId, from, to, action, count, files }: BatchFormProps) {
+export function BatchForm({ scope, scopeId, from, to, action, count }: BatchFormProps) {
   const router = useRouter();
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -28,17 +26,19 @@ export function BatchForm({ scope, scopeId, from, to, action, count, files }: Ba
       `${action}: move all ${count} ballots in ${scopeId} from ${from} to ${to} and publish a signed stage record?`,
     );
     if (!confirmed) return;
-    const form = new FormData(event.currentTarget);
-    form.set("to_status", to);
-    form.set("expected_count", String(count));
     setBusy(true);
     try {
-      const response = await fetch(`/api/batches?${scope}=${encodeURIComponent(scopeId)}`, { method: "POST", body: form });
-      const body = (await response.json()) as { error?: string; count?: number; challenged?: number; stage_record_id?: string | null };
+      // POST /api/batches (T-05) takes one JSON transition and publishes the signed stage record.
+      const response = await fetch("/api/batches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope, scope_id: scopeId, from_status: from, to_status: to }),
+      });
+      const body = (await response.json()) as { error?: string; ballot_count?: number; stage_record?: { id?: string } };
       if (response.ok) {
         setMessage(
-          `Done: ${body.count} ballots moved to ${to}${body.challenged ? `, ${body.challenged} challenged by a cross-check` : ""}.` +
-            (body.stage_record_id ? ` Stage record ${body.stage_record_id} published.` : ""),
+          `Done: ${body.ballot_count} ballots moved to ${to}.` +
+            (body.stage_record?.id ? ` Stage record ${body.stage_record.id} published.` : ""),
         );
         router.refresh();
       } else {
@@ -58,14 +58,6 @@ export function BatchForm({ scope, scopeId, from, to, action, count, files }: Ba
         <p>
           {count} ballots are at {from}.
         </p>
-        {files.map((file) => (
-          <p key={file.kind}>
-            <label>
-              {file.label}{" "}
-              <input type="file" name={file.kind} accept="application/json,.json" multiple={file.multiple} required />
-            </label>
-          </p>
-        ))}
         <button type="submit">{action}</button>
       </fieldset>
       {message && <p role="status">{message}</p>}

@@ -28,7 +28,6 @@ export default async function CountyPage({ params }: { params: Promise<{ id: str
         to="REPORTED_UNOFFICIAL"
         action="Report election-night results"
         count={counts.TALLIED_PRECINCT ?? 0}
-        files={[{ kind: "county_totals", label: "County election-night totals" }]}
       />
       <BatchForm
         scope="county"
@@ -37,7 +36,6 @@ export default async function CountyPage({ params }: { params: Promise<{ id: str
         to="CERTIFIED"
         action="Certify the county"
         count={counts.REPORTED_UNOFFICIAL ?? 0}
-        files={[{ kind: "certified_totals", label: "Certified totals" }]}
       />
       <p>
         <a href={`/official/challenges?county=${encodeURIComponent(id)}`}>Challenge queue</a> ·{" "}

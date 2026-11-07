@@ -15,6 +15,8 @@ import { cookies as nextCookies } from "next/headers";
 //   1. it carries a Supabase session, verified with auth.getClaims (never getSession): the
 //      Authorization: Bearer token when the header is present, otherwise the @supabase/ssr cookies;
 //   2. the session is multi-factor (JWT aal === "aal2") and is a signed-in, non-anonymous user;
+//   2b. the session is still live: auth.getUser asks the Auth server, so a signed-out or revoked
+//      session is refused before its token expires;
 //   3. the user's official_roles grant, read through PostgREST with the publishable key and the user's
 //      own token (RLS returns only their own row, and only at aal2), has one of the allowed roles;
 //   4. when the endpoint acts on a precinct or county, the grant covers it (@vbt/domain officialMayActOn).
@@ -146,6 +148,12 @@ export async function requireRole(
     if (claims.role !== "authenticated" || claims.is_anonymous === true) return DENY();
     const userId = claims.sub;
     if (typeof userId !== "string" || userId === "") return DENY();
+
+    // A verified JWT outlives sign-out and admin revocation until it expires, so ask the Auth server
+    // whether its session is still live (GoTrue's /user refuses a token whose session_id is gone). The
+    // aal and role checks above stay on the verified claims.
+    const live = token === null ? await client.auth.getUser() : await client.auth.getUser(token);
+    if (live.error || live.data.user?.id !== userId) return DENY();
 
     // No retries (postgrest-js retries GETs with backoff by default): a gate fails fast and closed.
     const lookup = await client

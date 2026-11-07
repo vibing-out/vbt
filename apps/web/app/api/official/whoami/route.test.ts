@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { aal2, accessToken, ENV, fakeSupabase, USERS } from "../../../../lib/testing/fake-supabase";
+import { aal2, accessToken, ENV, fakeSupabase, LIVE_SESSION, USERS } from "../../../../lib/testing/fake-supabase";
 import { GET } from "./route";
 
 // The route with its real dependencies: process.env, the global fetch and next/headers cookies (which
@@ -68,4 +68,13 @@ test("a malformed target is refused, even for the state official", async () => {
   for (const query of ["?precinct=", "?precinct=18097-001&county=18097", "?county=1&county=2"]) {
     expect((await call(query, bearer(token))).status, query).toBe(403);
   }
+});
+
+test("AC1: a signed-out or revoked aal2 session gets 403 before its token expires", async () => {
+  const token = await aal2(USERS.state);
+  expect((await call("", bearer(token))).status).toBe(200);
+  vi.stubGlobal("fetch", fakeSupabase({ revokedSessions: [LIVE_SESSION] }).fetch);
+  const response = await call("", bearer(token));
+  expect(response.status).toBe(403);
+  expect(await response.json()).toEqual({ error: "forbidden" });
 });

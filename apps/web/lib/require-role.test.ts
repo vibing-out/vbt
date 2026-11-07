@@ -8,6 +8,7 @@ import {
   ENV,
   fakeSupabase,
   type FakeSupabaseOptions,
+  LIVE_SESSION,
   PUBLISHABLE_KEY,
   sessionCookie,
   USERS,
@@ -112,6 +113,35 @@ describe("AC1: an unauthenticated or single-factor session gets 403", () => {
     await expectForbidden(check(new Request(URL_BASE), { extra: { cookies: async () => ({ getAll: () => [cookie] }) } }));
   });
 
+  test("a signed-out or revoked aal2 session, while its token is still unexpired (bearer and cookie)", async () => {
+    const options = { revokedSessions: [LIVE_SESSION] };
+    for (const user of [USERS.pollWorker, USERS.county, USERS.state]) {
+      const token = await aal2(user);
+      const { result, requests } = await check(bearer(token), { options });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.response.status).toBe(403);
+      // Refused by the live-session check, before any grant lookup.
+      expect(requests.some((r) => r.url.pathname === "/auth/v1/user")).toBe(true);
+      expect(requests.some((r) => r.url.pathname.startsWith("/rest/v1/"))).toBe(false);
+      const cookie = sessionCookie(token);
+      await expectForbidden(check(new Request(URL_BASE), { options, extra: { cookies: async () => ({ getAll: () => [cookie] }) } }));
+    }
+    // Another session of the same official is unaffected.
+    const { result } = await check(bearer(await aal2(USERS.state, { session_id: "other-live-session" })), { options });
+    expect(result.ok).toBe(true);
+  });
+
+  test("an aal2 token without a session_id claim", async () => {
+    await expectForbidden(check(bearer(await aal2(USERS.state, { session_id: undefined }))));
+  });
+
+  test.each([
+    ["an error status", { userStatus: 500 }],
+    ["a network failure", { networkFailure: /\/auth\/v1\/user/ }],
+  ] as Array<[string, FakeSupabaseOptions]>)("the live-session check gives %s: 403", async (_name, options) => {
+    await expectForbidden(check(bearer(await aal2(USERS.state)), { options }));
+  });
+
   test.each([
     ["the Supabase URL", { NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: PUBLISHABLE_KEY }],
     ["the publishable key", { NEXT_PUBLIC_SUPABASE_URL: ENV.NEXT_PUBLIC_SUPABASE_URL }],
@@ -164,6 +194,8 @@ describe("an aal2 official passes", () => {
     expect(roles?.method).toBe("GET");
     expect(roles?.headers.get("apikey")).toBe(PUBLISHABLE_KEY);
     expect(roles?.headers.get("authorization")).toBe(`Bearer ${token}`);
+    // The session was confirmed live with the Auth server, with the user's own token.
+    expect(requests.find((r) => r.url.pathname === "/auth/v1/user")?.headers.get("authorization")).toBe(`Bearer ${token}`);
     // Never a secret key: every request carries only the publishable key.
     expect(requests.every((r) => r.headers.get("apikey") === PUBLISHABLE_KEY)).toBe(true);
   });

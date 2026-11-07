@@ -3,8 +3,10 @@ import { expect, test } from "@playwright/test";
 import * as OTPAuth from "otpauth";
 
 // T-20 AC3: each seeded demo official signs in on a deployed preview with email, password and TOTP.
-// Run with PLAYWRIGHT_BASE_URL=<preview url> and the DEMO_* secrets (Vercel/Warp secrets only, never
-// the repo; supabase/scripts/seed-demo-officials.ts creates the accounts and prints the TOTP secrets).
+// Run with PLAYWRIGHT_BASE_URL=<preview url>, the DEMO_* secrets and, for a protected preview,
+// VERCEL_AUTOMATION_BYPASS_SECRET (playwright.config.ts sends it as x-vercel-protection-bypass). All are
+// Vercel/Warp secrets only, never the repo; supabase/scripts/seed-demo-officials.ts creates the accounts
+// and prints the TOTP secrets.
 // Skipped, not silently passed, when that env is missing.
 const ACCOUNTS = [
   { prefix: "DEMO_POLL_WORKER", role: "poll_worker", scope: "precinct" },

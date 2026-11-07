@@ -1,6 +1,7 @@
 // Test-only: a fake Supabase project for lib/require-role tests. It signs real ES256 JWTs and serves
 // their JWKS, so auth.getClaims verifies signatures for real, and it answers PostgREST reads of
 // official_roles the way the migration's RLS does (own row, aal2 only) and of precincts (public).
+// Its /auth/v1/user plays GoTrue: only a token it signed, unexpired, whose session_id is still live.
 // Never imported by app code.
 
 export const SUPABASE_URL = "https://demo.supabase.co";
@@ -45,12 +46,15 @@ export interface SignOptions {
   kid?: string;
 }
 
-/** A Supabase-style access token. Defaults: an authenticated aal2 session valid for an hour. */
+/** The session_id every token carries unless a test gives its own. */
+export const LIVE_SESSION = "00000000-0000-4000-8000-0000000000aa";
+
+/** A Supabase-style access token. Defaults: an authenticated session valid for an hour. */
 export async function accessToken(claims: Record<string, unknown>, options: SignOptions = {}): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const header = b64url(JSON.stringify({ alg: "ES256", typ: "JWT", kid: options.kid ?? KID }));
   const payload = b64url(
-    JSON.stringify({ iss: `${SUPABASE_URL}/auth/v1`, aud: "authenticated", role: "authenticated", iat: now, exp: now + 3600, ...claims }),
+    JSON.stringify({ iss: `${SUPABASE_URL}/auth/v1`, aud: "authenticated", role: "authenticated", iat: now, exp: now + 3600, session_id: LIVE_SESSION, ...claims }),
   );
   const key = options.forged ? forgerKey.privateKey : projectKey.privateKey;
   const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, new TextEncoder().encode(`${header}.${payload}`));
@@ -75,6 +79,26 @@ export function sessionCookie(token: string): { name: string; value: string } {
   return { name: AUTH_COOKIE, value: `base64-${b64url(JSON.stringify(session))}` };
 }
 
+/** What GoTrue's /user checks: our signature and kid, not expired. Returns the claims, or null. */
+async function verified(authorization: string | null): Promise<Record<string, unknown> | null> {
+  const [header, payload, signature] = (authorization?.replace(/^Bearer /, "") ?? "").split(".");
+  if (!header || !payload || !signature) return null;
+  try {
+    const { kid } = JSON.parse(Buffer.from(header, "base64url").toString()) as { kid?: unknown };
+    if (kid !== KID) return null;
+    const ok = await crypto.subtle.verify(
+      { name: "ECDSA", hash: "SHA-256" },
+      projectKey.publicKey,
+      Buffer.from(signature, "base64url"),
+      new TextEncoder().encode(`${header}.${payload}`),
+    );
+    const claims = JSON.parse(Buffer.from(payload, "base64url").toString()) as Record<string, unknown>;
+    return ok && typeof claims.exp === "number" && claims.exp > Date.now() / 1000 ? claims : null;
+  } catch {
+    return null;
+  }
+}
+
 function claimsOf(authorization: string | null): Record<string, unknown> {
   const token = authorization?.replace(/^Bearer /, "") ?? "";
   try {
@@ -93,6 +117,10 @@ export interface FakeSupabaseOptions {
   rolesRows?: (sub: string) => unknown[];
   /** Play a misconfigured database whose RLS returns the grant whatever the session's aal. */
   noRls?: boolean;
+  /** Sessions that were signed out or revoked: GoTrue's /user refuses their still-unexpired tokens. */
+  revokedSessions?: readonly string[];
+  /** Status for /auth/v1/user (default: 200 for a live session). */
+  userStatus?: number;
   /** Throw (a network failure) for requests whose path matches. */
   networkFailure?: RegExp;
 }
@@ -116,9 +144,22 @@ export function fakeSupabase(options: FakeSupabaseOptions = {}) {
     switch (url.pathname) {
       case "/auth/v1/.well-known/jwks.json":
         return Response.json({ keys: [publicJwk] });
-      case "/auth/v1/user":
-        // getClaims falls back to this for tokens it cannot verify locally; the fake knows no such user.
-        return Response.json({ code: 403, error_code: "bad_jwt", msg: "invalid JWT" }, { status: 403 });
+      case "/auth/v1/user": {
+        // getClaims falls back to this for tokens it cannot verify locally; requireRole calls it to
+        // confirm the session is still live.
+        if (options.userStatus && options.userStatus !== 200) {
+          return Response.json({ msg: "boom" }, { status: options.userStatus });
+        }
+        const claims = await verified(request.headers.get("authorization"));
+        if (!claims) return Response.json({ code: 403, error_code: "bad_jwt", msg: "invalid JWT" }, { status: 403 });
+        if (typeof claims.session_id !== "string" || options.revokedSessions?.includes(claims.session_id)) {
+          return Response.json(
+            { code: 403, error_code: "session_not_found", msg: "Session from session_id claim in JWT does not exist" },
+            { status: 403 },
+          );
+        }
+        return Response.json({ id: claims.sub, aud: "authenticated", role: claims.role, is_anonymous: claims.is_anonymous ?? false });
+      }
       case "/rest/v1/official_roles": {
         if (options.rolesStatus && options.rolesStatus !== 200) {
           return Response.json({ message: "boom" }, { status: options.rolesStatus });

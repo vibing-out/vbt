@@ -1,5 +1,6 @@
 import nextEnv from "@next/env";
 import { defineConfig, devices } from "@playwright/test";
+import { protectionBypassHeaders } from "./playwright.bypass";
 
 // Load .env, .env.local, etc. exactly as `next build`/`next start` do, so the test runner sees the
 // same env as the server it starts (the smoke spec gates the greeting assert on it).
@@ -17,7 +18,8 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: 0,
   reporter: process.env.CI ? "github" : "list",
-  use: { baseURL: remote ?? `http://localhost:${port}` },
+  // On a protected preview, VERCEL_AUTOMATION_BYPASS_SECRET lets requests past Vercel SSO.
+  use: { baseURL: remote ?? `http://localhost:${port}`, extraHTTPHeaders: protectionBypassHeaders(process.env) },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: remote
     ? undefined

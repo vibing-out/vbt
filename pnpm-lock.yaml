@@ -134,6 +134,9 @@ importers:
 
   tools/receipts:
     dependencies:
+      '@vbt/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       pdf-lib:
         specifier: 1.17.1
         version: 1.17.1

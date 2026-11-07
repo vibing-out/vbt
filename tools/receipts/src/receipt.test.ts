@@ -143,3 +143,69 @@ describe("AC3: the layout matches the receipt mockup", () => {
     expect(text).not.toContain("Text updates");
   });
 });
+
+describe("every receipt line stays on the 4-inch slip", () => {
+  const MARGIN = 0.3 * 72;
+
+  async function expectInsideSlip(pdf: Uint8Array) {
+    const { lines, pageWidth } = await extractPdf(pdf);
+    expect(pageWidth).toBe(4 * 72);
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) {
+      expect(line.left, line.text).toBeGreaterThanOrEqual(0);
+      // Inside the page and inside the printable area, so a printer's margin doesn't clip it.
+      expect(line.right, line.text).toBeLessThanOrEqual(pageWidth);
+      expect(line.right, line.text).toBeLessThanOrEqual(pageWidth - MARGIN + 0.5);
+      expect(line.y, line.text).toBeGreaterThan(0);
+    }
+    return lines;
+  }
+
+  it("for every receipt generated from the example input", async () => {
+    const docs = await generateBallotDocuments(input, { baseUrl: DEFAULT_TRACKER_BASE_URL });
+    for (const doc of docs) await expectInsideSlip(doc.receipt);
+  });
+
+  it("wraps a long precinct name instead of running off the edge", async () => {
+    const precinctName = "Washington Township Northeast Consolidated Fire District Annex 14";
+    const lines = await expectInsideSlip(await buildReceiptPdf({ ...receiptInput, precinctName }));
+    const text = lines.map((l) => l.text).join(" ");
+    expect(text).toContain(`Precinct ${precinctName} (18097-001)`); // every word printed, in order
+    const precinctLines = lines.filter((l) => /Precinct|Annex|18097-001/.test(l.text));
+    expect(precinctLines.length).toBeGreaterThan(1);
+  });
+
+  it("fits a long tracker address and phone line, and the QR code still opens the tracker", async () => {
+    const baseUrl = "https://vbt-git-task-t-07-paper-ballot-receipt-vibing-out.preview.example.vercel.app";
+    const phone = "(317) 555-0100 ext. 4400, Marion County Election Board voter line";
+    const pdf = await buildReceiptPdf({ ...receiptInput, baseUrl, phone });
+    const lines = await expectInsideSlip(pdf);
+    const text = lines.map((l) => l.text).join(" ");
+    expect(text).toContain(`Track it: ${baseUrl.replace("https://", "")}/track`);
+    expect(text).toContain(`Or call: ${phone}`);
+    expect(text).toContain("It does not show how you voted."); // the footer survives
+    expect(await decodeQrCodes(pdf)).toEqual([`${baseUrl}/track/SEED-0001`]);
+  });
+
+  it("fits a long county and election name in the title", async () => {
+    await expectInsideSlip(
+      await buildReceiptPdf({
+        ...receiptInput,
+        countyName: "Consolidated City of Indianapolis and Marion County",
+        electionName: "Special Municipal and School Referendum Election",
+      }),
+    );
+  });
+
+  it("refuses text too long to fit, rather than printing past the bottom edge", async () => {
+    await expect(buildReceiptPdf({ ...receiptInput, precinctName: "Annex ".repeat(200) })).rejects.toThrow(
+      /does not fit/,
+    );
+  });
+
+  it("leaves a receipt that already fits unchanged", () => {
+    const lines = receiptLines(receiptInput);
+    expect(lines.trackIt).toBe("Track it:  www.ballottrack.org/track");
+    expect(lines.orCall).toBe(`Or call:   ${PLACEHOLDER_PHONE}`);
+  });
+});

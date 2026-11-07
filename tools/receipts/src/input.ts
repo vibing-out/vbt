@@ -4,7 +4,13 @@
 //
 // Unknown fields are rejected, so a time of casting or a voter's details can't ride along unnoticed.
 
+// The election rules (what a ballot style holds, vote_for, repeated or unknown selections) live in
+// @vbt/domain; this file only checks the file's shape and reports where a problem is.
+
+import { type ChoiceProblem, checkChoices, type Contest, type Manifest } from "@vbt/domain";
 import { parseCalendarDate } from "./dates.ts";
+
+export type { BallotStyle, Contest, Manifest, Selection } from "@vbt/domain";
 
 export interface Election {
   county_name: string; // e.g. "Marion County"
@@ -15,28 +21,6 @@ export interface Election {
 export interface Precinct {
   id: string;
   name: string;
-}
-
-export interface Selection {
-  id: string;
-  name: string;
-}
-
-export interface Contest {
-  id: string;
-  title: string;
-  vote_for: number;
-  selections: Selection[];
-}
-
-export interface BallotStyle {
-  id: string;
-  contest_ids: string[];
-}
-
-export interface Manifest {
-  contests: Contest[];
-  ballot_styles: BallotStyle[];
 }
 
 export interface BallotEntry {
@@ -120,6 +104,23 @@ function parseContest(value: unknown, path: string): Contest {
   return { id: text(o.id, `${path}.id`), title: text(o.title, `${path}.title`), vote_for: voteFor, selections };
 }
 
+/** Puts the input path in front of a domain choice problem. */
+function choiceError(problem: ChoiceProblem, path: string, styleId: string): string {
+  const cpath = `${path}.choices.${problem.contestId ?? ""}`;
+  switch (problem.code) {
+    case "CONTEST_NOT_ON_STYLE":
+      return `${cpath}: contest is not on ballot style ${styleId}`;
+    case "DUPLICATE_SELECTION":
+      return `${cpath} selects the same choice twice`;
+    case "OVERVOTE":
+      return `${cpath}: ${problem.message}`;
+    case "UNKNOWN_SELECTION":
+      return `${cpath}: unknown selection ${problem.selectionId ?? ""}`;
+    default:
+      return `${path}: ${problem.message}`;
+  }
+}
+
 /** Parses and validates the generator input. Throws with the path of the first problem. */
 export function parseInput(raw: unknown): ReceiptsInput {
   const root = object(raw, "input", ["version", "election", "precincts", "manifest", "ballots"]);
@@ -153,6 +154,7 @@ export function parseInput(raw: unknown): ReceiptsInput {
     return { id: text(so.id, `${path}.id`), contest_ids: contestIds };
   });
   const styleById = uniqueIds(ballotStyles, "manifest.ballot_styles");
+  const manifest: Manifest = { contests, ballot_styles: ballotStyles };
 
   const seenCodes = new Set<string>();
   const ballots = array(root.ballots, "ballots").map((b, i): BallotEntry => {
@@ -165,8 +167,7 @@ export function parseInput(raw: unknown): ReceiptsInput {
     const precinctId = text(bo.precinct_id, `${path}.precinct_id`);
     if (!precinctById.has(precinctId)) throw new Error(`${path}.precinct_id ${precinctId} is not in precincts`);
     const styleId = text(bo.ballot_style, `${path}.ballot_style`);
-    const style = styleById.get(styleId);
-    if (!style) throw new Error(`${path}.ballot_style ${styleId} is not in manifest.ballot_styles`);
+    if (!styleById.has(styleId)) throw new Error(`${path}.ballot_style ${styleId} is not in manifest.ballot_styles`);
     const castDate = text(bo.cast_date, `${path}.cast_date`);
     parseCalendarDate(castDate, `${path}.cast_date`);
 
@@ -174,18 +175,10 @@ export function parseInput(raw: unknown): ReceiptsInput {
     const choices: Record<string, string[]> = {};
     for (const [contestId, picked] of Object.entries(bo.choices)) {
       const cpath = `${path}.choices.${contestId}`;
-      const contest = contestById.get(contestId);
-      if (!contest || !style.contest_ids.includes(contestId)) {
-        throw new Error(`${cpath}: contest is not on ballot style ${styleId}`);
-      }
-      const ids = array(picked, cpath).map((s, j) => text(s, `${cpath}[${j}]`));
-      if (new Set(ids).size !== ids.length) throw new Error(`${cpath} selects the same choice twice`);
-      if (ids.length > contest.vote_for) throw new Error(`${cpath} selects more than ${contest.vote_for}`);
-      for (const id of ids) {
-        if (!contest.selections.some((s) => s.id === id)) throw new Error(`${cpath}: unknown selection ${id}`);
-      }
-      choices[contestId] = ids;
+      choices[contestId] = array(picked, cpath).map((s, j) => text(s, `${cpath}[${j}]`));
     }
+    const problem = checkChoices(manifest, styleId, choices);
+    if (problem) throw new Error(choiceError(problem, path, styleId));
 
     return {
       tracking_code: trackingCode,
@@ -197,5 +190,5 @@ export function parseInput(raw: unknown): ReceiptsInput {
     };
   });
 
-  return { version: 1, election, precincts, manifest: { contests, ballot_styles: ballotStyles }, ballots };
+  return { version: 1, election, precincts, manifest, ballots };
 }

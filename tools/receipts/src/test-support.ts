@@ -10,6 +10,10 @@ export interface TextLine {
   text: string;
   /** Baseline height from the bottom of the page, in points. */
   y: number;
+  /** Left edge of the line's leftmost text item, in points from the page's left edge. */
+  left: number;
+  /** Right edge of the line's rightmost text item (its x plus its advance width), in points. */
+  right: number;
 }
 
 export interface ImagePlacement {
@@ -25,6 +29,7 @@ export interface ExtractedPdf {
   info: Record<string, unknown>;
   images: ImagePlacement[];
   pageHeight: number;
+  pageWidth: number;
 }
 
 type Matrix = [number, number, number, number, number, number];
@@ -54,14 +59,21 @@ export async function extractPdf(bytes: Uint8Array): Promise<ExtractedPdf> {
     const content = await page.getTextContent();
     // pdf.js may split one drawn line into several items; join items on the same baseline and
     // collapse runs of whitespace so tests compare words, not spacing.
-    const byBaseline = new Map<number, string[]>();
+    const byBaseline = new Map<number, { parts: string[]; left: number; right: number }>();
     for (const item of content.items) {
       if (!("str" in item)) continue;
       const y = Math.round((item.transform[5] as number) * 100) / 100;
-      byBaseline.set(y, [...(byBaseline.get(y) ?? []), item.str]);
+      const x = item.transform[4] as number;
+      const line = byBaseline.get(y) ?? { parts: [], left: Infinity, right: -Infinity };
+      line.parts.push(item.str);
+      if (item.str.trim() !== "") {
+        line.left = Math.min(line.left, x);
+        line.right = Math.max(line.right, x + item.width);
+      }
+      byBaseline.set(y, line);
     }
     const lines: TextLine[] = [...byBaseline.entries()]
-      .map(([y, parts]) => ({ y, text: parts.join(" ").replace(/\s+/g, " ").trim() }))
+      .map(([y, l]) => ({ y, left: l.left, right: l.right, text: l.parts.join(" ").replace(/\s+/g, " ").trim() }))
       .filter((l) => l.text !== "")
       .sort((a, b) => b.y - a.y);
 
@@ -85,6 +97,7 @@ export async function extractPdf(bytes: Uint8Array): Promise<ExtractedPdf> {
       info: info as Record<string, unknown>,
       images,
       pageHeight: page.view[3] as number,
+      pageWidth: page.view[2] as number,
     };
   } finally {
     await task.destroy();

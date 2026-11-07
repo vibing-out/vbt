@@ -6,8 +6,8 @@
 // nothing printed joins the two.
 
 import { rgb, StandardFonts } from "pdf-lib";
+import { type BallotChoices, type ContestSummary, type Manifest, summarizeChoices as summarize } from "@vbt/domain";
 import { formatCalendarDate } from "./dates.ts";
-import type { BallotStyle, Contest, Manifest } from "./input.ts";
 import { INCH, newDocument, saveDocument, wrapText } from "./pdf.ts";
 
 export interface PaperBallotInput {
@@ -21,35 +21,23 @@ export interface PaperBallotInput {
   electionName: string;
   manifest: Manifest;
   /** contest id -> selection ids. */
-  choices: Record<string, string[]>;
+  choices: BallotChoices;
 }
 
-export interface ContestSummary {
-  title: string;
-  voteFor: number;
-  /** Selection names, or empty for an undervote. */
-  selected: string[];
-}
+export type { ContestSummary } from "@vbt/domain";
 
 export const NO_SELECTION = "No selection";
 
-/** Every contest on the ballot style, in manifest order, with what was selected. */
-export function summarizeChoices(input: Pick<PaperBallotInput, "manifest" | "ballotStyle" | "choices">): ContestSummary[] {
-  const style: BallotStyle | undefined = input.manifest.ballot_styles.find((s) => s.id === input.ballotStyle);
-  if (!style) throw new Error(`Unknown ballot style ${input.ballotStyle}`);
-  for (const contestId of Object.keys(input.choices)) {
-    if (!style.contest_ids.includes(contestId)) throw new Error(`Contest ${contestId} is not on ballot style ${style.id}`);
-  }
-  return style.contest_ids.map((contestId) => {
-    const contest: Contest | undefined = input.manifest.contests.find((c) => c.id === contestId);
-    if (!contest) throw new Error(`Unknown contest ${contestId}`);
-    const selected = (input.choices[contestId] ?? []).map((id) => {
-      const selection = contest.selections.find((s) => s.id === id);
-      if (!selection) throw new Error(`Unknown selection ${id} in contest ${contestId}`);
-      return selection.name;
-    });
-    return { title: contest.title, voteFor: contest.vote_for, selected };
-  });
+/**
+ * Every contest on the ballot style, in style order, with what was selected. The rules (style
+ * membership, vote_for, repeated or unknown selections) are @vbt/domain's; this throws when they fail.
+ */
+export function summarizeChoices(
+  input: Pick<PaperBallotInput, "manifest" | "ballotStyle" | "choices">,
+): readonly ContestSummary[] {
+  const result = summarize(input.manifest, input.ballotStyle, input.choices);
+  if (!result.ok) throw new Error(result.message);
+  return result.contests;
 }
 
 const WIDTH = 4 * INCH;

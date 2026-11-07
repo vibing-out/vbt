@@ -5,12 +5,12 @@
 //
 // The input type has no field for choices, machine ID, time or name, so none can reach the slip.
 
-import { rgb, StandardFonts } from "pdf-lib";
+import { type PDFFont, rgb, StandardFonts } from "pdf-lib";
 import QRCode from "qrcode";
 import { PLACEHOLDER_PHONE, printedWebAddress, trackerUrl } from "./config.ts";
 import { formatCalendarDate } from "./dates.ts";
 import { assertTrackingCode } from "./input.ts";
-import { fitSize, INCH, newDocument, saveDocument, wrapText } from "./pdf.ts";
+import { fitSize, fitText, INCH, newDocument, saveDocument } from "./pdf.ts";
 
 export interface ReceiptInput {
   /** Printed exactly as stored; never derived or reformatted. */
@@ -79,17 +79,23 @@ export async function buildReceiptPdf(input: ReceiptInput): Promise<Uint8Array> 
   page.drawRectangle({ x: 0, y: 0, width: RECEIPT_WIDTH, height: RECEIPT_HEIGHT, color: RECEIPT_TINT });
 
   let y = RECEIPT_HEIGHT - MARGIN;
-  const line = (text: string, font = regular, size = 10, gap = 4) => {
+  const draw = (text: string, font: PDFFont, size: number, gap: number) => {
     y -= size;
     page.drawText(text, { x: MARGIN, y, size, font, color: ink });
     y -= gap;
   };
+  // Every text line stays inside the slip: it is wrapped, and a word too long for a line (a long
+  // precinct name or tracker host) is shrunk. Wrapped lines sit 3 points apart, as the title always has.
+  const block = (text: string, font = regular, size = 10, gap = 4) => {
+    const fitted = fitText(text, font, size, width);
+    fitted.forEach((l, i) => draw(l.text, font, l.size, i === fitted.length - 1 ? gap : 3));
+  };
 
-  for (const titleLine of wrapText(lines.title, bold, 9, width)) line(titleLine, bold, 9, 3);
-  line(lines.precinct, regular, 10);
-  line(lines.castOn, regular, 10, 12);
-  line(lines.codeLabel, regular, 10, 6);
-  line(lines.code, mono, fitSize(lines.code, mono, 16, width), 10);
+  block(lines.title, bold, 9, 3);
+  block(lines.precinct, regular, 10);
+  block(lines.castOn, regular, 10, 12);
+  block(lines.codeLabel, regular, 10, 6);
+  draw(lines.code, mono, fitSize(lines.code, mono, 16, width), 10);
 
   const png = await QRCode.toBuffer(url, {
     type: "png",
@@ -103,10 +109,13 @@ export async function buildReceiptPdf(input: ReceiptInput): Promise<Uint8Array> 
   page.drawImage(qr, { x: (RECEIPT_WIDTH - QR_SIZE) / 2, y, width: QR_SIZE, height: QR_SIZE });
   y -= 10;
 
-  line(lines.trackIt, regular, 10);
-  line(lines.orCall, regular, 10, 12);
-  line(lines.footer[0], regular, 9, 2);
-  line(lines.footer[1], bold, 9, 0);
+  block(lines.trackIt, regular, 10);
+  block(lines.orCall, regular, 10, 12);
+  block(lines.footer[0], regular, 9, 2);
+  block(lines.footer[1], bold, 9, 0);
+
+  // Never print past the bottom edge: a slip that loses its footer would be misleading.
+  if (y < MARGIN) throw new Error("Receipt text does not fit on the 4 x 6 inch slip; shorten the precinct or election name");
 
   return saveDocument(doc);
 }

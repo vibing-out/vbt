@@ -107,6 +107,8 @@ export {
   totalsEqual,
 } from "./crosscheck.ts";
 
+export { stageMemberEventTypes } from "./stage-members.ts";
+
 export {
   buildTrackTimeline,
   FALLBACK_RANK,
@@ -117,3 +119,5 @@ export {
   stageOrder,
   type TrackTimelineEntry,
 } from "./timeline.ts";
+
+export { isRecordStage, type RecordStage, STAGE_SCOPE } from "./record-stage.ts";

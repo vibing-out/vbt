@@ -37,7 +37,7 @@ test("AC1: returns status, label, dated timeline and the precinct's published st
         merkleRoot: "root-TALLIED_PRECINCT",
         signature: "sig-base64",
         publishedOn: "2026-11-03",
-        recordUrl: null,
+        recordUrl: "/record#record-18097-001-TALLIED_PRECINCT",
         check: { state: "passed", proof: { path: ["x"] } },
       },
     ],
@@ -101,6 +101,25 @@ test("a record reader's link is passed through", async () => {
     records: { recordUrl: (r) => `/api/record/${r.scopeId}/${r.stage}` },
   });
   expect(result?.stages[0]?.recordUrl).toBe("/api/record/18097-001/TALLIED_PRECINCT");
+});
+
+test("T-08b AC1: by default each published stage links to its entry on /record", async () => {
+  const data = seededData();
+  data.ballots[0]!.current_status = "CERTIFIED";
+  data.events.push(
+    event({ hash: "b3", prev_hash: "f2", event_type: "STATUS_CHANGE", from_status: "TALLIED_PRECINCT", to_status: "REPORTED_UNOFFICIAL" }),
+    event({ hash: "c4", prev_hash: "b3", event_type: "STATUS_CHANGE", from_status: "REPORTED_UNOFFICIAL", to_status: "CERTIFIED" }),
+  );
+  data.stageRecords.push(
+    stageRecord({ stage: "REPORTED_UNOFFICIAL", scope: "county", scope_id: "18097" }),
+    stageRecord({ stage: "CERTIFIED", scope: "county", scope_id: "18097" }),
+  );
+  const result = await lookupBallot("SEED-0001", { env: ENV, fetch: fakeTrackerDb(data).fetch });
+  expect(result?.stages.map((s) => s.recordUrl)).toEqual([
+    "/record#record-18097-001-TALLIED_PRECINCT",
+    "/record#record-18097-REPORTED_UNOFFICIAL",
+    "/record#record-18097-CERTIFIED",
+  ]);
 });
 
 test("an unknown code returns null", async () => {

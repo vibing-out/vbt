@@ -51,6 +51,8 @@ describe('check', () => {
     expect(check(example.replace(tests, '### Tests\n- All tests pass.\n\n'), 'review').errors)
       .toContain('Tests: give counts from what ran (for example "111 passed, 0 failed"), or a "Not run:" line saying why')
     expect(check(example.replace(tests, '### Tests\n- Not run: CI had not finished after 7 minutes.\n\n'), 'review').errors).toEqual([])
+    // A pending suite is often named first, since review no longer waits for CI.
+    expect(check(example.replace(tests, '### Tests\n- Lint and typecheck passed.\n- `pnpm test`: Not run: CI pending.\n\n'), 'review').errors).toEqual([])
   })
 
   it('requires every finding to carry severity and status', () => {

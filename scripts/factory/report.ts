@@ -119,7 +119,7 @@ export function check(body: string, kind: Kind): Checked {
 
   // Tests: counts from what ran, or an honest "Not run:".
   const tests = get('Tests')
-  if (titles.includes('Tests') && !isBlank(tests) && !tests.some(line => TEST_COUNT.test(line) || /^\W*not run:/i.test(line.trim()))) {
+  if (titles.includes('Tests') && !isBlank(tests) && !tests.some(line => TEST_COUNT.test(line) || /\bnot run:/i.test(line))) {
     errors.push('Tests: give counts from what ran (for example "111 passed, 0 failed"), or a "Not run:" line saying why')
   }
 

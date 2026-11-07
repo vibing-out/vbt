@@ -2,14 +2,14 @@ import "server-only";
 
 import {
   type BallotStatus,
-  checkCertification,
-  checkMachineCounts,
+  type BatchTotals,
+  certificationExplained,
   type CrossCheckId,
+  findMachineMismatches,
   isBallotStatus,
   type OfficialTarget,
   planBatch,
-  sumTotals,
-  type Totals,
+  sumBatchTotals,
   totalsEqual,
   TRANSITIONS,
   validateBatchTransition,
@@ -130,7 +130,7 @@ export async function runBatch(official: Official, input: BatchInput, deps: Batc
     const files = parseFiles(edge, target, input.files);
     const manifest: ElectionManifest = files.totals.manifest;
     let cachedKeys: CryptoKeys | undefined;
-    const decrypt = async (ciphertexts: readonly string[]): Promise<Totals> => {
+    const decrypt = async (ciphertexts: readonly string[]): Promise<BatchTotals> => {
       cachedKeys ??= deps.keys();
       let contests;
       try {
@@ -150,7 +150,7 @@ export async function runBatch(official: Official, input: BatchInput, deps: Batc
 
     let failedMachines: string[] = [];
     let scopeFailed: CrossCheckId | null = null;
-    let batchTotals: Totals | undefined;
+    let batchTotals: BatchTotals | undefined;
 
     if (edge.to === "TALLIED_PRECINCT") {
       const machines = new Set(await deps.db.precinctMachines(target.id));
@@ -165,19 +165,19 @@ export async function runBatch(official: Official, input: BatchInput, deps: Batc
       const ballotCounts = await deps.db.machineBallotCounts(target.id);
       const missing = Object.keys(ballotCounts).filter((m) => (ballotCounts[m] ?? 0) > 0 && !Object.hasOwn(logCounts, m));
       if (missing.length > 0) throw new Refusal(422, `the machine log for ${missing.sort().join(", ")} is required`);
-      failedMachines = checkMachineCounts(logCounts, ballotCounts); // C1
+      failedMachines = findMachineMismatches(logCounts, ballotCounts); // C1
       batchTotals = await decrypt(ballots.map((b) => b.ciphertext));
       if (!totalsEqual(batchTotals, files.totals.totals)) scopeFailed = "C2";
     } else if (edge.to === "REPORTED_UNOFFICIAL") {
       const rows = await deps.db.stageTotals("county", target.id, "TALLIED_PRECINCT");
-      const precincts = sumTotals(rows.filter((r) => r.scope === "precinct").map((r) => ({ ballotCount: r.ballot_count, contests: r.totals })));
+      const precincts = sumBatchTotals(rows.filter((r) => r.scope === "precinct").map((r) => ({ ballotCount: r.ballot_count, contests: r.totals })));
       if (!totalsEqual(precincts, files.totals.totals)) scopeFailed = "C3";
     } else {
       const rows = await deps.db.stageTotals("county", target.id, "REPORTED_UNOFFICIAL");
-      const electionNight = sumTotals(rows.filter((r) => r.scope === "county").map((r) => ({ ballotCount: r.ballot_count, contests: r.totals })));
+      const electionNight = sumBatchTotals(rows.filter((r) => r.scope === "county").map((r) => ({ ballotCount: r.ballot_count, contests: r.totals })));
       batchTotals = await decrypt(ballots.map((b) => b.ciphertext));
       const removed = await decrypt(await deps.db.challengeRemoved(target.id));
-      if (!checkCertification({ electionNight, certified: files.totals.totals, current: batchTotals, removed })) scopeFailed = "C4";
+      if (!certificationExplained({ electionNight, certified: files.totals.totals, current: batchTotals, removed })) scopeFailed = "C4";
     }
 
     const plan = planBatch({ ballots: ballots.map((b) => ({ id: b.id, machineId: b.machine_id })), failedMachines, scopeFailed });

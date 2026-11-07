@@ -1,4 +1,4 @@
-import type { Totals } from "@vbt/domain";
+import type { BatchTotals } from "@vbt/domain";
 import { IngestError } from "./errors";
 
 // Results totals, in the shape epic/4's simulator writes (tools/simulator/src/types.ts TotalsFile):
@@ -13,7 +13,7 @@ export interface TotalsFile {
   readonly scope: TotalsScope;
   readonly scopeId: string;
   readonly electionId: string;
-  readonly totals: Totals;
+  readonly totals: BatchTotals;
   /** Every contest and selection the file lists, for aggregate decryption. */
   readonly manifest: { contests: Array<{ id: string; choices: Array<{ id: string }> }> };
 }

@@ -1,0 +1,28 @@
+# Static analysis (SAST) on every pull request, including ticket pull requests into epic/*, and on main.
+# Results post on the pull request and in Security > Code scanning. Make "CodeQL / analyze" a required
+# check in the main and epic/* rulesets so a high-severity alert blocks the merge.
+name: CodeQL
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '23 6 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript, actions
+          build-mode: none
+          queries: security-extended
+      - uses: github/codeql-action/analyze@v4

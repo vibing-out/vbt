@@ -3,17 +3,24 @@
   "private": true,
   "type": "module",
   "engines": { "node": "24.x" },
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "bin": {
     "vbt-verify": "./src/cli.ts"
   },
   "scripts": {
-    "verify": "node src/cli.ts",
-    "typecheck": "tsc -p .",
-    "test": "vitest run --coverage"
+    "verify": "pnpm --filter @vbt/crypto build && node src/cli.ts",
+    "typecheck": "pnpm --filter @vbt/crypto build && tsc --noEmit",
+    "test": "pnpm --filter @vbt/crypto build && vitest run"
+  },
+  "dependencies": {
+    "@vbt/crypto": "workspace:*",
+    "@vbt/events": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "24.10.1",
-    "@vitest/coverage-v8": "5.1.0",
+    "@vbt/scale-demo": "workspace:*",
     "typescript": "5.9.3",
     "vitest": "5.1.0"
   }

@@ -41,7 +41,7 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  dispatch-check:
     if: github.event_name == 'issues' && github.event.label.name == 'queued'
     # Per job, not per workflow: a workflow-level group would let an unrelated label event cancel a pending check.
     concurrency:

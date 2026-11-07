@@ -19,6 +19,7 @@ const OUTBOUND_ALLOWLIST: Record<string, string> = {
   "apps/web/lib/require-role.ts": "our own Supabase: Auth session, role and MFA check",
   "apps/web/lib/service-db.ts": "our own Supabase: service-role RPCs for ingest and batches (T-05)",
   "apps/web/lib/official-db.ts": "our own Supabase: service-role RPCs for uploads, batches and challenges (T-09)",
+  "apps/web/app/api/record/record.ts": "our own Supabase: public stage-record reads through the Data API (T-05a)",
   "apps/web/app/login/login-form.tsx": "our own Supabase: official sign-in and MFA in the browser (T-09)",
   "apps/web/app/official/batch-form.tsx": "same origin: POST /api/batches (T-09)",
   "apps/web/app/official/challenges/resolve-form.tsx": "same origin: POST /api/challenges/:id/resolve (T-09)",

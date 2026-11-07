@@ -14,18 +14,44 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Runs `check` on a branch's latest commit. dispatch.ts landed starts it on epic/<n> after updating the
+  # branch from main with GITHUB_TOKEN, a push that starts no workflow, so the required check still runs.
+  workflow_dispatch:
+  # The merge queue on main runs the required `check` on each queue entry (main plus the queued pull requests).
+  # `migrate` runs on push only, so a queue entry never touches the database.
+  merge_group:
+    types: [checks_requested]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege: both jobs only read the repository (migrate authenticates to Supabase with its own secret).
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Throwaway Postgres for the supabase/ database tests (migrations, insert-only, RLS, seed).
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
@@ -33,7 +59,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
+      # Proves the migrations apply to an empty database (the seed never runs in production).
+      - run: pnpm --filter @vbt/supabase db:apply
       - run: pnpm test
+      # Smoke e2e: chromium only, @smoke only, against a production build (no DB env, so it checks structure).
+      - run: pnpm --filter web exec playwright install --with-deps chromium
+      - run: pnpm --filter web test:e2e
 
   migrate:
     needs: check
@@ -42,7 +73,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb # v1.7.3
         with:
           version: 2.122.1
       - env:

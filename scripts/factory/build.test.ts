@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
-  branchName, build, decisions, redacted, run, hasSlot, parseClaude, prBody, reviewVerdict, STAGES, verdict, withContract, withoutVerdict, MAX_REVIEW_ROUNDS,
+  afterFixes, branchName, build, decisions, redacted, run, hasSlot, parseClaude, prBody, reviewVerdict, STAGES, verdict, withContract, withoutVerdict, MAX_REVIEW_ROUNDS,
   type BuildDeps, type Exec, type Stage,
 } from './build.ts'
 import { check as checkReport } from './report.ts'
@@ -9,6 +9,8 @@ import { check as checkReport } from './report.ts'
 const EXAMPLE = readFileSync(new URL('./report.example.md', import.meta.url), 'utf8')
 // The example report with its first fixed finding reopened: an open unambiguous fix.
 const OPEN_FIX = EXAMPLE.replace('[high, fixed]', '[high, open]')
+// The example report with only its low-severity fix reopened.
+const LOW_FIX = EXAMPLE.replace('[low, fixed]', '[low, open]')
 import type { GitHub, Issue, IssueRef } from './dispatch.ts'
 
 const claudeJson = (result: string, models = ['claude-opus-5-5']): string =>
@@ -95,6 +97,20 @@ describe('prompts', () => {
   })
 })
 
+describe('afterFixes', () => {
+  const low = [{ severity: 'low' }]
+  const mixed = [{ severity: 'low' }, { severity: 'medium' }]
+  it.each([
+    [1, mixed, 'again'],
+    [2, low, 'fix-unreviewed'],
+    [2, mixed, 'stop'],
+    [2, [], 'stop'],
+    [2, null, 'stop'], // a report that failed its check has no trustworthy severities
+  ] as const)('round %i with %j open goes to %s', (round, fixes, expected) => {
+    expect(afterFixes(round, fixes ? [...fixes] : null)).toBe(expected)
+  })
+})
+
 describe('reviewVerdict', () => {
   it('lets the checked report overrule a VERDICT line that says clean', () => {
     const report = checkReport(OPEN_FIX, 'review')
@@ -157,11 +173,13 @@ function world(
   opts: { checksFail?: boolean; inFlight?: string; issue?: Issue; merge?: { code: number; stdout: string }; markers?: boolean; authFails?: boolean } = {},
 ) {
   const calls: string[] = []
+  const inputs: string[] = [] // standard input of each command, such as pull request bodies
   const labels: string[] = []
   const queue = Object.fromEntries(Object.entries(answers).map(([k, v]) => [k, [...v]])) as Partial<Record<Stage, string[]>>
   const exec: Exec = async (command, args, options) => {
     const line = `${command} ${args.join(' ')}`
     calls.push(line)
+    if (options?.input) inputs.push(options.input)
     const done = (stdout = '') => ({ code: 0, stdout, stderr: '' })
     if (command === 'claude' && args.includes('Reply with exactly: OK')) return opts.authFails ? { code: 1, stdout: '', stderr: 'Invalid OAuth token sk-ant-oat01-abc' } : done(claudeJson('OK', ['claude-haiku-5-5']))
     if (command === 'claude' && args.includes('--continue')) return done(claudeJson('still not a report'))
@@ -199,12 +217,13 @@ function world(
     writeFile: async (path) => void calls.push(`write ${path}`),
     notify: async () => void calls.push('notify'),
     landed: async (pr) => void calls.push(`landed ${pr}`),
+    rollup: async (epic) => void calls.push(`rollup ${epic}`),
     runUrl: 'https://github.com/vibing-out/vbt/actions/runs/7',
     runId: 7,
     sleep: async () => {},
     log: () => {},
   }
-  return { calls, labels, deps }
+  return { calls, labels, inputs, deps }
 }
 
 describe('build', () => {
@@ -254,6 +273,15 @@ describe('build', () => {
     expect(w.calls.some((c) => c.startsWith('claude'))).toBe(false)
   })
 
+  it('writes the roll-up right after opening the epic pull request', async () => {
+    const w = world({ triage: ['Needs a credential.\nVERDICT: needs-human'] })
+    w.deps.github.epicPull = async () => null
+    await build(32, w.deps)
+    const opened = w.calls.findIndex((c) => c.startsWith('gh pr create') && c.includes('--label epic'))
+    expect(opened).toBeGreaterThan(-1)
+    expect(w.calls[opened + 1]).toBe('rollup 4')
+  })
+
   it('sends review fixes back to implement, then merges once review is clean', async () => {
     const w = world({
       triage: ['ready\nVERDICT: clean'],
@@ -296,6 +324,33 @@ describe('build', () => {
     expect(w.calls.filter((c) => c.startsWith('claude') && c.includes('Read,Grep,Glob,WebSearch') && !c.includes('--continue')).length).toBe(4) // triage, spec, 2 reviews
     expect(w.calls.some((c) => c.startsWith('gh pr merge'))).toBe(false)
     expect(w.labels).toEqual(['needs-human', 'needs-human'])
+  })
+
+  it('fixes low-severity findings left after round 2 without a third review, and merges once the checks pass', async () => {
+    const w = world({
+      triage: ['VERDICT: clean'], spec: ['VERDICT: clean'],
+      implement: ['a\nVERDICT: clean', 'b\nVERDICT: clean', 'c\nVERDICT: clean'],
+      review: [`${OPEN_FIX}\nVERDICT: fixes`, `${LOW_FIX}\nVERDICT: fixes`],
+    })
+    expect(await build(32, w.deps)).toBe('merged')
+    expect(w.calls.filter((c) => c.startsWith('claude') && c.includes('Read,Edit,Write')).length).toBe(3) // 2 rounds + the low fix
+    expect(w.inputs.filter((i) => /^Review round \d+ started/.test(i)).length).toBe(2) // no third review
+    // The fix's new head gets its checks dispatched, and the merge waits for them.
+    const order = w.calls.filter((c) => /^(gh pr (ready|merge)|dispatch )/.test(c))
+    expect(order.slice(-4)).toEqual(['dispatch ci.yml', 'dispatch factory.yml', 'gh pr ready 34', 'gh pr merge 34 --squash'])
+    const finalBody = w.inputs.filter((i) => i.includes('## Review log')).at(-1)!
+    expect(finalBody).toContain('Fixed after round 2, not re-reviewed (low severity; the required checks passed):')
+    expect(finalBody).toContain('The context-log block was missing resolutions.')
+  })
+
+  it('stops for a person when round 2 leaves a medium or high fix open', async () => {
+    const w = world({
+      triage: ['VERDICT: clean'], spec: ['VERDICT: clean'],
+      implement: ['a\nVERDICT: clean', 'b\nVERDICT: clean'],
+      review: [`${LOW_FIX}\nVERDICT: fixes`, `${OPEN_FIX}\nVERDICT: fixes`],
+    })
+    expect(await build(32, w.deps)).toBe('needs-human')
+    expect(w.calls.some((c) => c.startsWith('gh pr merge'))).toBe(false)
   })
 
   it('stops for a person when checks still fail after two implement attempts', async () => {

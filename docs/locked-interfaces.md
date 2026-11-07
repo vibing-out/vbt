@@ -133,6 +133,7 @@ No table holds a voter's name, ID, date of birth, or signature.
 | `POST /api/batches` | Poll worker or official | Supabase Auth with MFA, role-checked | Batch id, count; publishes a stage record |
 | `POST /api/challenges/{id}/resolve` | Official | Supabase Auth | New status |
 | `GET /api/reports/mismatches` | Official | Supabase Auth | Mismatch list |
+| `POST /api/official/demo/runs?set={id}` | State official, or county official scoped to the set's county (T-22; approved by Austin on #49) | Supabase Auth with MFA, role-checked | Streamed step results (NDJSON); 409 if the set has already run |
 | POST /api/sms/inbound | SMS provider webhook | Provider signature | Reply text; handles check, TRACK, YES, STOP, HELP |
 
 ## Stack and repo layout (Proposed)
@@ -149,6 +150,7 @@ supabase/migrations Schema, RLS policies, seed scripts
 tools/simulator     Voting machine event simulator
 tools/receipts      Paper ballot and tracking-code receipt generator
 tools/verifier      Independent verifier CLI for the public record
+tools/demo          Judges' demo kit: seed and 3-minute timeline (T-22; approved by Austin on #49)
 tests/load          k6 scripts
 ```
 

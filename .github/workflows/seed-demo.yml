@@ -1,0 +1,121 @@
+# Seeds the production database with T-11's synthetic scale-demo election (tools/scale-demo): county
+# SCALE-DEMO, 20 fictional precincts, ballots cast 2026-11-03. No real voter data; the seed holds no names,
+# no times beyond the cast date, and writes ballot_events and stage_records insert-only.
+#
+# Run by hand from the Actions tab. Start with dry_run (the default): it prints the seed's planned counts and
+# what SCALE-DEMO already holds, and writes nothing. A real run writes only when SCALE-DEMO is absent, in one
+# transaction, so running it again never duplicates rows.
+#
+# Repository secrets required:
+#   SUPABASE_DB_PASSWORD, SUPABASE_PROJECT_ID  - the same connection ci.yml's migrate job uses
+#   ELECTION_PUBLIC_KEY, ELECTION_SECRET_KEY,
+#   STAGE_SIGNING_PUBLIC_KEY, STAGE_SIGNING_SECRET_KEY
+#                                              - base64 keys (.env.example), the same values the
+#                                                production deployment uses, so the site verifies them
+
+name: Seed demo election
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Print counts only, write nothing
+        type: boolean
+        default: true
+      size:
+        description: Ballots to seed (20 to 10000)
+        type: string
+        default: '10000'
+
+# One seed at a time, and never cancel one mid-transaction.
+concurrency:
+  group: seed-demo
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+# Named shell: bash adds pipefail, so a failing seed fails the step even when piped through tee.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SIZE: ${{ inputs.size }}
+      PGHOST: aws-0-us-east-2.pooler.supabase.com
+      PGPORT: '5432'
+      PGDATABASE: postgres
+      PGUSER: postgres.${{ secrets.SUPABASE_PROJECT_ID }}
+      PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      PGSSLMODE: require
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check inputs and the seed tool
+        run: |
+          if [ ! -f tools/scale-demo/src/cli.ts ]; then
+            echo "::error::tools/scale-demo is not on this branch yet (T-11 lands with epic/7)."
+            exit 1
+          fi
+          if ! [[ "$SIZE" =~ ^[0-9]+$ ]] || [ "$SIZE" -lt 20 ] || [ "$SIZE" -gt 10000 ]; then
+            echo "::error::size must be a whole number from 20 to 10000."
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter @vbt/scale-demo...
+
+      # Read-only: what SCALE-DEMO holds now. Counts only, never tracking codes or ids.
+      - name: Count existing SCALE-DEMO rows
+        id: existing
+        run: |
+          counts=$(psql -v ON_ERROR_STOP=1 -AtF ' ' -c "
+            select
+              (select count(*) from public.precincts where county_id = 'SCALE-DEMO'),
+              (select count(*) from private.ballots b join public.precincts p on p.id = b.precinct_id
+                where p.county_id = 'SCALE-DEMO'),
+              (select count(*) from private.ballots b join public.precincts p on p.id = b.precinct_id
+                where p.county_id = 'SCALE-DEMO' and b.current_status = 'CHALLENGED'),
+              (select count(*) from private.ballot_events where county_id = 'SCALE-DEMO'),
+              (select count(*) from public.stage_records s join public.precincts p on p.id = s.scope_id
+                where s.scope = 'precinct' and p.county_id = 'SCALE-DEMO')")
+          read -r precincts ballots challenged events records <<< "$counts"
+          {
+            echo "### SCALE-DEMO in the database before this run"
+            echo "precincts $precincts, ballots $ballots, challenged $challenged, events $events, stage records $records"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "precincts=$precincts" >> "$GITHUB_OUTPUT"
+
+      # The seed refuses to run when CI is set, so a test job can never write to production. This job is the
+      # deliberate, hand-started run that guard leaves to a person, so it clears CI for the seed step only.
+      - name: Dry run (planned counts only)
+        if: inputs.dry_run
+        env:
+          CI: ''
+        run: pnpm --filter @vbt/scale-demo seed --ballots "$SIZE" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Seed
+        if: ${{ !inputs.dry_run && steps.existing.outputs.precincts == '0' }}
+        env:
+          CI: ''
+          ELECTION_PUBLIC_KEY: ${{ secrets.ELECTION_PUBLIC_KEY }}
+          ELECTION_SECRET_KEY: ${{ secrets.ELECTION_SECRET_KEY }}
+          STAGE_SIGNING_PUBLIC_KEY: ${{ secrets.STAGE_SIGNING_PUBLIC_KEY }}
+          STAGE_SIGNING_SECRET_KEY: ${{ secrets.STAGE_SIGNING_SECRET_KEY }}
+        run: |
+          export PRODUCT_DATABASE_URL="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}?sslmode=require&uselibpqcompat=true"
+          pnpm --filter @vbt/scale-demo seed --yes --ballots "$SIZE" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Already seeded
+        if: ${{ !inputs.dry_run && steps.existing.outputs.precincts != '0' }}
+        run: echo "SCALE-DEMO is already seeded; nothing written." | tee -a "$GITHUB_STEP_SUMMARY"

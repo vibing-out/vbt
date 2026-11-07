@@ -7,15 +7,13 @@
 // Totals are keyed by contest and selection ids that come from uploaded files, so every map here is
 // built with Object.create(null) and read with Object.hasOwn: a "__proto__" key is data, never a prototype.
 
-/** Aggregate totals: how many ballots, and contest id -> selection id -> votes. Never per ballot. */
-export interface Totals {
+import type { CrossCheckId, Totals } from "./cross-checks.ts";
+
+/** Aggregate totals with how many ballots they cover. Never per ballot. */
+export interface BatchTotals {
   readonly ballotCount: number;
-  readonly contests: Readonly<Record<string, Readonly<Record<string, number>>>>;
+  readonly contests: Totals;
 }
-
-export const CROSS_CHECKS = Object.freeze(["C1", "C2", "C3", "C4"] as const);
-
-export type CrossCheckId = (typeof CROSS_CHECKS)[number];
 
 export interface CrossCheckResult {
   readonly check: CrossCheckId;
@@ -38,7 +36,7 @@ function countOf(record: Readonly<Record<string, number>>, key: string): number 
  * equal the ballots recorded as cast on it. Returns the machines that disagree, sorted; empty when C1
  * passes. A machine missing from one side counts as zero there.
  */
-export function checkMachineCounts(
+export function findMachineMismatches(
   logCounts: Readonly<Record<string, number>>,
   ballotCounts: Readonly<Record<string, number>>,
 ): string[] {
@@ -54,8 +52,8 @@ function emptyContests(): Record<string, Record<string, number>> {
   return Object.create(null) as Record<string, Record<string, number>>;
 }
 
-/** Adds `sign` × each part into one Totals. Missing contests and selections count as zero. */
-function combine(parts: ReadonlyArray<{ totals: Totals; sign: 1 | -1 }>): Totals {
+/** Adds `sign` × each part into one BatchTotals. Missing contests and selections count as zero. */
+function combine(parts: ReadonlyArray<{ totals: BatchTotals; sign: 1 | -1 }>): BatchTotals {
   let ballotCount = 0;
   const contests = emptyContests();
   for (const { totals, sign } of parts) {
@@ -73,12 +71,12 @@ function combine(parts: ReadonlyArray<{ totals: Totals; sign: 1 | -1 }>): Totals
 }
 
 /** The sum of several totals (C3: precinct totals add up to the county's). */
-export function sumTotals(parts: readonly Totals[]): Totals {
+export function sumBatchTotals(parts: readonly BatchTotals[]): BatchTotals {
   return combine(parts.map((totals) => ({ totals, sign: 1 })));
 }
 
 /** a − b, contest by contest. Results may be negative. */
-export function subtractTotals(a: Totals, b: Totals): Totals {
+export function subtractTotals(a: BatchTotals, b: BatchTotals): BatchTotals {
   return combine([
     { totals: a, sign: 1 },
     { totals: b, sign: -1 },
@@ -89,7 +87,7 @@ export function subtractTotals(a: Totals, b: Totals): Totals {
  * True when both report the same ballot count and the same votes for every contest and selection
  * either names. A selection listed with 0 votes on one side and missing on the other is equal.
  */
-export function totalsEqual(a: Totals, b: Totals): boolean {
+export function totalsEqual(a: BatchTotals, b: BatchTotals): boolean {
   const diff = subtractTotals(a, b);
   if (diff.ballotCount !== 0) return false;
   return Object.values(diff.contests).every((row) => Object.values(row).every((n) => n === 0));
@@ -97,13 +95,13 @@ export function totalsEqual(a: Totals, b: Totals): boolean {
 
 export interface CertificationInput {
   /** The county's published election-night (REPORTED_UNOFFICIAL) totals. */
-  readonly electionNight: Totals;
+  readonly electionNight: BatchTotals;
   /** The certified totals file. */
-  readonly certified: Totals;
+  readonly certified: BatchTotals;
   /** Decrypted totals of the county's ballots now at REPORTED_UNOFFICIAL (the ones to certify). */
-  readonly current: Totals;
+  readonly current: BatchTotals;
   /** Decrypted totals of the ballots that left REPORTED_UNOFFICIAL through a challenge or discard. */
-  readonly removed: Totals;
+  readonly removed: BatchTotals;
 }
 
 /**
@@ -111,7 +109,7 @@ export interface CertificationInput {
  * election-night totals is explained by a recorded challenge or discard (election night − certified =
  * removed).
  */
-export function checkCertification(input: CertificationInput): boolean {
+export function certificationExplained(input: CertificationInput): boolean {
   return (
     totalsEqual(input.certified, input.current) &&
     totalsEqual(subtractTotals(input.electionNight, input.certified), input.removed)

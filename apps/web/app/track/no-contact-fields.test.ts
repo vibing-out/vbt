@@ -25,7 +25,9 @@ test("the tracker source has no sign-up, email or phone wording or fields", () =
   }
 });
 
+vi.mock("next/headers", () => ({ headers: async () => new Headers({ host: "www.ballottrack.org" }) }));
 vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: () => {} }),
   redirect: (url: string) => {
     throw Object.assign(new Error("NEXT_REDIRECT"), { url });
   },

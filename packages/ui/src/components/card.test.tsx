@@ -39,4 +39,15 @@ describe("Card", () => {
     expect(screen.getByText("Admin sentence.").className).toContain("text-body");
     expect(screen.getByTestId("admin").dataset.mode).toBe("admin");
   });
+
+  test("title renders h2 by default and h3 on request", () => {
+    render(
+      <>
+        <CardTitle>Default</CardTitle>
+        <CardTitle level={3}>Nested</CardTitle>
+      </>,
+    );
+    expect(screen.getByRole("heading", { level: 2, name: "Default" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 3, name: "Nested" })).toBeTruthy();
+  });
 });

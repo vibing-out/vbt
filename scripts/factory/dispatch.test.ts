@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  check, contextComment, epicReady, epicReadyMessage, landed, notify, readiness, restGitHub, slackMessage, slackText, ticketNumber, trimmed, unblock, webhookUrl,
-  type Blocker, type EpicPull, type GitHub, type Issue, type IssueRef, type LabelNotice, type Pull,
+  check, contextComment, resume, resumeSkipReason, epicReady, epicReadyMessage, landed, notify, readiness, restGitHub, slackMessage, slackText, ticketNumber, trimmed, unblock, webhookUrl,
+  type Actor, type Blocker, type EpicPull, type GitHub, type Issue, type IssueRef, type LabelNotice, type Pull,
 } from './dispatch.ts'
 
 const ref = (number: number, title: string, state: IssueRef['state'] = 'OPEN', labels: string[] = []): IssueRef => ({ number, title, state, labels })
@@ -21,7 +21,13 @@ const ticket = (overrides: Partial<Issue> = {}): Issue => ({
 })
 
 // A fake GitHub that records every write in order, so tests can assert on sequencing.
-function fakeGitHub(issues: Issue[], pull?: Pull, notice?: LabelNotice, epicPull: EpicPull | null = null): GitHub & { calls: string[] } {
+function fakeGitHub(
+  issues: Issue[],
+  pull?: Pull,
+  notice?: LabelNotice,
+  epicPull: EpicPull | null = null,
+  unlabeler: Actor | null = null,
+): GitHub & { calls: string[] } {
   const calls: string[] = []
   const byNumber = new Map(issues.map((i) => [i.number, i]))
   return {
@@ -54,6 +60,10 @@ function fakeGitHub(issues: Issue[], pull?: Pull, notice?: LabelNotice, epicPull
       calls.push(`read notice #${n} ${label}`)
       if (!notice) throw new Error('no notice')
       return notice
+    },
+    async unlabeledBy(n, label) {
+      calls.push(`read unlabel #${n} ${label}`)
+      return unlabeler
     },
     async epicPull(n) {
       calls.push(`find epic pull for #${n}`)
@@ -169,6 +179,58 @@ describe('check', () => {
     }
     await expect(check(12, { github, context, log: silent })).rejects.toThrow('sign-in failed')
     expect(github.calls).toEqual([])
+  })
+})
+
+describe('resume', () => {
+  const person: Actor = { login: 'austin', type: 'User' }
+  const deps = (github: GitHub) => ({ github, context: async () => 'no entries', now: () => new Date('2026-11-07T12:00:00Z'), log: silent })
+
+  it('re-queues a ticket when a person removes needs-human: comments, then runs check', async () => {
+    const github = fakeGitHub([ticket()], undefined, undefined, null, person)
+    expect(await resume(12, deps(github))).toBe('ready')
+    expect(github.calls).toEqual([
+      'read unlabel #12 needs-human',
+      'comment #12 Resuming: a person answered and removed needs-human.',
+      'comment #12 ## Context from earlier tickets',
+      'label #12 +factory-ready',
+    ])
+  })
+  it('removes factory-ready before check runs, so check does not skip it', async () => {
+    const github = fakeGitHub([ticket({ labels: ['queued', 'factory-ready'] })], undefined, undefined, null, person)
+    // The fake keeps returning the issue as fetched, so mirror the removal the way GitHub would.
+    const removeLabel = github.removeLabel.bind(github)
+    github.removeLabel = async (n, label) => {
+      await removeLabel(n, label)
+      const issue = await github.issue(n)
+      issue.labels = issue.labels.filter((l) => l !== label)
+    }
+    expect(await resume(12, deps(github))).toBe('ready')
+    expect(github.calls).toEqual([
+      'read unlabel #12 needs-human',
+      'comment #12 Resuming: a person answered and removed needs-human.',
+      'label #12 -factory-ready',
+      'comment #12 ## Context from earlier tickets',
+      'label #12 +factory-ready',
+    ])
+  })
+  it('skips when a bot removed the label, since the factory removes it after successful reviews', async () => {
+    const github = fakeGitHub([ticket()], undefined, undefined, null, { login: 'warp-agent', type: 'Bot' })
+    const lines: string[] = []
+    expect(await resume(12, { ...deps(github), log: (l: string) => lines.push(l) })).toBe('skipped')
+    expect(github.calls).toEqual(['read unlabel #12 needs-human'])
+    expect(lines).toEqual(['#12: skipped resume, needs-human was removed by Bot warp-agent, not a person'])
+  })
+  it('skips epics and closed issues', async () => {
+    const github = fakeGitHub([ticket({ labels: ['epic'] }), ticket({ number: 13, state: 'CLOSED' })], undefined, undefined, null, person)
+    expect(await resume(12, deps(github))).toBe('skipped')
+    expect(await resume(13, deps(github))).toBe('skipped')
+    expect(github.calls.filter((c) => !c.startsWith('read'))).toEqual([])
+  })
+  it('skips an unknown actor and a label that was added back', () => {
+    expect(resumeSkipReason(ticket(), null)).toBe('needs-human was removed by an unknown actor, not a person')
+    expect(resumeSkipReason(ticket({ labels: ['queued', 'needs-human'] }), person)).toBe('it has needs-human again')
+    expect(resumeSkipReason(ticket(), person)).toBeNull()
   })
 })
 
@@ -322,12 +384,13 @@ describe('Slack notification', () => {
         '<https://github.com/vibing-out/vbt/issues/12#issuecomment-1|Newest comment> by warp-agent:',
         '> Which table holds voters?',
         '> Should it be soft-deleted?',
+        'Reply on the issue, then remove `needs-human` to resume.',
       ].join('\n'),
     )
   })
   it('says so when the issue has no comments or the label has no actor', () => {
     expect(slackMessage(notice({ comment: null, labeledBy: null }))).toBe(
-      ['<!here> *<https://github.com/vibing-out/vbt/issues/12|#12 T-04 Schema>*', '`needs-human` added by an unknown actor', '_No comments on the issue yet._'].join('\n'),
+      ['<!here> *<https://github.com/vibing-out/vbt/issues/12|#12 T-04 Schema>*', '`needs-human` added by an unknown actor', '_No comments on the issue yet._', 'Reply on the issue, then remove `needs-human` to resume.'].join('\n'),
     )
   })
   it('escapes &, < and > so ticket text cannot form links or close the quote', () => {
@@ -352,7 +415,7 @@ describe('Slack notification', () => {
     const long = trimmed('x'.repeat(2_000))
     expect(long).toBe(`${'x'.repeat(1_500)}…`)
     expect(trimmed(`${'x'.repeat(1_499)}😀😀`)).toBe(`${'x'.repeat(1_499)}😀…`)
-    const quoted = slackMessage(notice({ comment: { author: 'a', body: 'y'.repeat(5_000), url: 'u' } })).split('\n').at(-1)
+    const quoted = slackMessage(notice({ comment: { author: 'a', body: 'y'.repeat(5_000), url: 'u' } })).split('\n').at(-2)
     expect(quoted).toBe(`> ${'y'.repeat(1_500)}…`)
   })
   it('skips without reading GitHub or posting when the webhook is unset or empty', async () => {

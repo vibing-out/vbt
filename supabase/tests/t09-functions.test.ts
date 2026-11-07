@@ -382,7 +382,8 @@ describeDb("AC7: only service_role may execute the T-09 functions", () => {
        from pg_proc p join pg_namespace n on n.oid = p.pronamespace
        where (n.nspname = 'public' and p.proname like 'official\\_%') or n.nspname = 'private' order by 1`,
     );
-    expect(rows.length).toBe(NEW_FUNCTIONS.length + 3);
+    // Private helpers: event_hash, event_chain_head and record_uploads (T-09), chain_heads_for (T-05).
+    expect(rows.length).toBe(NEW_FUNCTIONS.length + 4);
     for (const row of rows) expect(row, row.name).toMatchObject({ anon: false, authenticated: false, service: true });
   });
 

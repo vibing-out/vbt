@@ -62,3 +62,20 @@ test("returns null when sign-in fails, and does not call the RPC", async () => {
   expect(await countContextEntries(env)).toBeNull();
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
+
+test("returns null (not 0) when sign-in succeeds but search_context fails", async () => {
+  const fetchMock = vi.fn(async (url: string) =>
+    url.includes("/auth/v1/token")
+      ? Response.json({ access_token: "jwt-123" })
+      : Response.json({ message: "internal error" }, { status: 500 }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  expect(await countContextEntries(env)).toBeNull();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+test("returns null (not 0) when search_context returns a non-list", async () => {
+  const fetchMock = mockSupabase({ id: 1 });
+  expect(await countContextEntries(env)).toBeNull();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});

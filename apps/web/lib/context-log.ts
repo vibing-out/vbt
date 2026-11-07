@@ -3,7 +3,8 @@ import "server-only";
 // Counts entries in the shared context log (Supabase project vbt-context-log). Mirrors the sign-in
 // and search_context call in scripts/context.ts, but reads the web server's own CONTEXT_* names.
 // Server-only: the password and the signed-in token never reach the browser.
-// Returns null when the env is missing or a call fails, so the page renders an empty region.
+// Returns null when the env is missing or a call fails, so the page shows "Context log: unavailable"
+// (distinct from 0, which means the log was read and has no entries).
 export async function countContextEntries(env: Readonly<Record<string, string | undefined>> = process.env): Promise<number | null> {
   const url = env.CONTEXT_SUPABASE_URL?.replace(/\/$/, "");
   const apikey = env.CONTEXT_SUPABASE_PUBLISHABLE_KEY;

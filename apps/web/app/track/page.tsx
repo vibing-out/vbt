@@ -6,7 +6,8 @@ import { TRACKING_CODE_PATTERN } from "@vbt/crypto";
 import { headers } from "next/headers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { normalizeCode, sampleCodes } from "../../lib/demo-election";
+import { sampleCodes } from "../../lib/demo-election";
+import { normaliseCode } from "../../lib/track/code";
 import { receiptOrigin } from "../../lib/receipt-qr";
 import { RECEIPT_HOSTS } from "../../lib/receipt-url";
 import { ReceiptScanner } from "./receipt-scanner";
@@ -20,7 +21,7 @@ export default async function TrackPage({
   searchParams: Promise<{ code?: string }>;
 }): Promise<React.JSX.Element> {
   const { code } = await searchParams;
-  if (code && code.trim()) redirect(`/track/${encodeURIComponent(normalizeCode(code))}`);
+  if (code && code.trim()) redirect(`/track/${encodeURIComponent(normaliseCode(code))}`);
   // Receipts printed from this host (a preview or local build) scan here too, besides the public domain.
   const { host } = receiptOrigin(await headers());
   const scanHosts = [...new Set([...RECEIPT_HOSTS, host])];
@@ -30,7 +31,7 @@ export default async function TrackPage({
         <p className="text-label uppercase text-on-inverse-muted">Marion County General Election · Nov 3, 2026</p>
         <h1 className="text-display">Track your ballot</h1>
         <CardDescription>
-          Follow your ballot from cast to certified, with proof at every stage. No account, email or phone number.
+          Follow your ballot from cast to certified, with proof at every stage. All you need is the code on your receipt.
         </CardDescription>
       </Card>
       <Card>
@@ -41,6 +42,7 @@ export default async function TrackPage({
             label="Tracking code"
             hint="Printed on your receipt, or open it by scanning the receipt's QR code."
             placeholder="RIVER-MAPLE-7Q4K-HAWK"
+            type="text"
             variant="code"
             autoComplete="off"
             autoCapitalize="characters"
@@ -48,7 +50,7 @@ export default async function TrackPage({
             required
           />
           <Button type="submit" className="w-full">
-            Track my ballot
+            Track ballot
           </Button>
         </form>
         <ReceiptScanner hosts={scanHosts} codePattern={TRACKING_CODE_PATTERN.source} manualInputId="code" />

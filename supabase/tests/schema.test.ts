@@ -5,8 +5,8 @@ import { asRole, asRoleSteps, describeDb, useScratchDatabase } from "./support.t
 
 // ballots and ballot_events live in private, out of the Data API's reach (resolution 1).
 const PUBLIC_TABLES = ["app_info", "batches", "machines", "official_roles", "precincts", "stage_records"];
-// T-10: the cross-check records are official-only, so they live in private too.
-const PRIVATE_TABLES = ["ballot_events", "ballots", "check_results", "ingest_files", "machine_log_imports", "official_results"];
+// T-09 uploads and the T-10 cross-check records are official-only, so they live in private too.
+const PRIVATE_TABLES = ["ballot_events", "ballots", "check_results", "ingest_files", "machine_log_imports", "official_results", "uploads"];
 const TABLES = [...PUBLIC_TABLES.map((t) => `public.${t}`), ...PRIVATE_TABLES.map((t) => `private.${t}`)].sort();
 
 describeDb("migrations on an empty database", () => {

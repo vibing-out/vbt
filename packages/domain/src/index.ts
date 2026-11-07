@@ -12,6 +12,7 @@ export {
   type BatchTransitionInput,
   CHALLENGEABLE_STATUSES,
   findRule,
+  PUBLISHED_STAGES,
   TRANSITIONS,
   type TransitionErrorCode,
   type TransitionInput,
@@ -45,6 +46,20 @@ export {
 } from "./mismatch.ts";
 
 export {
+  type BallotChoices,
+  type BallotStyle,
+  type ChoiceErrorCode,
+  type ChoiceProblem,
+  type ChoiceSummaryResult,
+  checkChoices,
+  type Contest,
+  type ContestSummary,
+  type Manifest,
+  type Selection,
+  summarizeChoices,
+} from "./manifest.ts";
+
+export {
   affectedBallotIds,
   CHECK_FAILURES,
   CHECK_SCOPES,
@@ -75,3 +90,30 @@ export {
   sumTotals,
   type Totals,
 } from "./cross-checks.ts";
+
+export {
+  type BatchPlan,
+  type BatchPlanInput,
+  type BatchTotals,
+  type CertificationInput,
+  certificationExplained,
+  type CrossCheckResult,
+  findMachineMismatches,
+  mismatchReason,
+  planBatch,
+  type PlannedBallot,
+  subtractTotals,
+  sumBatchTotals,
+  totalsEqual,
+} from "./crosscheck.ts";
+
+export {
+  buildTrackTimeline,
+  FALLBACK_RANK,
+  orderByChain,
+  publicReason,
+  type PublicEvent,
+  sortStageRecords,
+  stageOrder,
+  type TrackTimelineEntry,
+} from "./timeline.ts";

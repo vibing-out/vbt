@@ -1,0 +1,38 @@
+{
+  "scope": "precinct",
+  "scopeId": "18097-001",
+  "electionId": "marion-general-2026-11-03",
+  "ballotCount": 17,
+  "contests": [
+    {
+      "contestId": "contest-president",
+      "selections": [
+        {
+          "selectionId": "cand-a",
+          "votes": 6
+        },
+        {
+          "selectionId": "cand-b",
+          "votes": 6
+        },
+        {
+          "selectionId": "cand-c",
+          "votes": 5
+        }
+      ]
+    },
+    {
+      "contestId": "contest-measure-1",
+      "selections": [
+        {
+          "selectionId": "yes",
+          "votes": 9
+        },
+        {
+          "selectionId": "no",
+          "votes": 8
+        }
+      ]
+    }
+  ]
+}

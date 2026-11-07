@@ -5,9 +5,18 @@ export default defineConfig({
     include: ["src/**/*.test.ts"],
     coverage: {
       provider: "v8",
-      include: ["src/status.ts", "src/transition.ts", "src/official.ts", "src/mismatch.ts", "src/cross-checks.ts"],
+      include: [
+        "src/status.ts",
+        "src/transition.ts",
+        "src/official.ts",
+        "src/mismatch.ts",
+        "src/manifest.ts",
+        "src/crosscheck.ts",
+        "src/cross-checks.ts",
+        "src/timeline.ts",
+      ],
       reporter: ["text"],
-      // The transition rules, the official scope rule, the mismatch rules and the cross-checks are the source of truth; every
+      // The transition rules, the official scope rule, the mismatch rules, the ballot choice rules and the cross-checks are the source of truth; every
       // branch must be exercised.
       thresholds: {
         branches: 100,

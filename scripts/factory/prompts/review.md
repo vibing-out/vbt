@@ -8,6 +8,25 @@ domain logic outside packages/domain or crypto outside packages/crypto,
 a missing or invalid context-log block, and any secret, voter identity,
 or cast time exposed publicly.
 
+Find candidates in three focused passes, run in parallel with the Task
+tool so no pass inherits another's conclusions. Give each pass the diff
+path, the ticket's acceptance criteria and its one focus, and require
+every candidate to cite file:line:
+1. Correctness: logic errors, broken edge cases, unmet or untested
+   acceptance criteria, scope creep.
+2. Security: input a caller controls reaching SQL, RPC, file paths,
+   redirects or rendered HTML; missing auth, role or MFA checks on
+   official routes; tables or views without row-level security or with
+   grants wider than docs/locked-interfaces.md allows; secrets; new or
+   changed dependencies.
+3. Election invariants: the list in CLAUDE.md under "Election
+   invariants".
+Then verify every candidate yourself: open the cited file:line and
+confirm the code does what the finding claims. Drop any you cannot show
+from the code, and list them under QA performed as 'Dropped after
+verification: <claim> (<why>)'. Only verified candidates become
+findings.
+
 You own every finding and open question: resolve it yourself. Pass to a
 human only what the procedure below cannot settle. For each one, in
 order, stop at the first step that settles it:
@@ -57,10 +76,13 @@ time, locked interfaces and owned areas, each with what you checked.
 the dispatch, if any) fixed or open.
 '#### Unambiguous fixes': each with file, line, impact, the fix, and
 the step-1 citation or step-2 URL that settles it (or 'self-evident' for
-a plain bug).
-'#### Judgment calls for a human': step-3 items only. Each with file,
-line, the question, its category (product or values choice, locked
-interface, or owned area), 'Sources checked:' listing every step-1 file
+a plain bug). Only code changes belong here. An item no code change can
+settle (human operations such as applying a migration, setting a
+secret, or an approval) goes under judgment calls, category 'human
+operations'.
+'#### Judgment calls for a human': step-3 items and human operations
+only. Each with file, line, the question, its category (product or
+values choice, locked interface, owned area, or human operations), 'Sources checked:' listing every step-1 file
 and step-2 URL you read for it, and 'Why none settles it:' in one line.
 Write 'none' under a subsection with no items.
 '### Decisions': one line per question you resolved, as a JSON object

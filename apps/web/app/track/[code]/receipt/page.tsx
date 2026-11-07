@@ -3,8 +3,8 @@ import { Card, CardDescription, CardTitle } from "@vbt/ui/components/card";
 import { Receipt } from "@vbt/ui/components/receipt";
 import { headers } from "next/headers";
 import Link from "next/link";
-import QRCode from "qrcode";
 import { lookup } from "../../../../lib/demo-election";
+import { receiptOrigin, receiptQrSvg } from "../../../../lib/receipt-qr";
 import { TrackerShell } from "../../shell";
 
 export const dynamic = "force-dynamic";
@@ -26,15 +26,9 @@ export default async function ReceiptPage({ params }: { params: Promise<{ code: 
       </TrackerShell>
     );
   }
-  const h = await headers();
-  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "www.ballottrack.org";
-  const proto = h.get("x-forwarded-proto") ?? "https";
-  // 4-module quiet zone and at least 25mm printed (design system README, Print).
-  const qrSvg = await QRCode.toString(`${proto}://${host}/track/${view.trackingCode}`, {
-    type: "svg",
-    margin: 4,
-    errorCorrectionLevel: "M",
-  });
+  const { host, origin } = receiptOrigin(await headers());
+  // At least 25mm printed (design system README, Print).
+  const qrSvg = await receiptQrSvg(origin, view.trackingCode);
   return (
     <TrackerShell>
       <div className="flex flex-col gap-2" data-print="hide">

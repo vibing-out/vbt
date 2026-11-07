@@ -8,14 +8,16 @@
   "scripts": {
     "db:apply": "node scripts/apply.ts",
     "seed:demo-officials": "node scripts/seed-demo-officials.ts",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "typecheck": "pnpm --filter @vbt/crypto build && tsc --noEmit",
+    "test": "pnpm --filter @vbt/crypto build && vitest run"
   },
   "devDependencies": {
     "@supabase/supabase-js": "2.119.0",
     "@types/node": "24.10.1",
     "@types/pg": "8.23.1",
+    "@vbt/crypto": "workspace:*",
     "@vbt/domain": "workspace:*",
+    "@vbt/events": "workspace:*",
     "otpauth": "9.6.0",
     "pg": "8.23.1",
     "typescript": "5.9.3",

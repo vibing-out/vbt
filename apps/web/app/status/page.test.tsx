@@ -7,9 +7,9 @@ const mocks = vi.hoisted(() => ({
   greeting: vi.fn(async (): Promise<string | null> => "Hello, VBT"),
   count: vi.fn(async (): Promise<number | null> => 4),
 }));
-vi.mock("../lib/demo-flags", () => ({ getDemoFlags: mocks.demoFlags }));
-vi.mock("../lib/product-db", () => ({ readGreeting: mocks.greeting }));
-vi.mock("../lib/context-log", () => ({ countContextEntries: mocks.count }));
+vi.mock("../../lib/demo-flags", () => ({ getDemoFlags: mocks.demoFlags }));
+vi.mock("../../lib/product-db", () => ({ readGreeting: mocks.greeting }));
+vi.mock("../../lib/context-log", () => ({ countContextEntries: mocks.count }));
 
 const { default: Home } = await import("./page");
 const render = async () => renderToStaticMarkup(await Home());

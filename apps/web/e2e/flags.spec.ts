@@ -19,7 +19,7 @@ for (const { key, label } of demoFlags) {
     baseURL,
   }) => {
     test.skip(!secret, "PLAYWRIGHT_BASE_URL is set without the deployment's FLAGS_SECRET, so no override cookie can be made");
-    await page.goto("/");
+    await page.goto("/status");
     for (const flag of demoFlags) await expect(page.getByTestId(`flag-${flag.key}`)).toHaveText(`${flag.label}: on`);
 
     const value = await encryptOverrides({ [key]: false }, secret);

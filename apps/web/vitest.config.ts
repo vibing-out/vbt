@@ -7,6 +7,7 @@ export default defineConfig({
     alias: { "server-only": fileURLToPath(new URL("./node_modules/server-only/empty.js", import.meta.url)) },
   },
   test: {
+    setupFiles: ["./vitest.setup.ts"],
     exclude: ["node_modules/**", "e2e/**", ".next/**"],
   },
 });

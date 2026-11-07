@@ -42,7 +42,9 @@ export default async function BallotPage({ params }: { params: Promise<{ code: s
       <section style={styles.card} aria-label="Integrity check">
         <p style={view.allChecksPass ? styles.ok : styles.bad} data-testid="integrity">
           {view.allChecksPass
-            ? "✓ Your encrypted ballot is unchanged and included in every published record."
+            ? view.timeline.some((t) => t.record)
+              ? "✓ Your encrypted ballot is unchanged and included in every published record."
+              : "✓ Your encrypted ballot is recorded unchanged. It is held out of the published totals."
             : "✗ An integrity check failed. Report this to the county election board."}
         </p>
         <p style={styles.mono}>Encrypted ballot fingerprint (SHA-256): {view.ciphertextHash}</p>
@@ -67,6 +69,10 @@ export default async function BallotPage({ params }: { params: Promise<{ code: s
         This page shows your ballot&apos;s progress, never how you voted or when. Sharing it proves nothing about your vote.{" "}
         <Link href="/track" style={{ color: "inherit" }}>
           Track another ballot
+        </Link>
+        {" · "}
+        <Link href={`/track/${view.trackingCode}/receipt`} style={{ color: "inherit" }}>
+          View the paper receipt
         </Link>
       </p>
     </main>

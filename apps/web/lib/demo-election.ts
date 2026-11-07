@@ -50,7 +50,8 @@ export type TrackView = {
 const COUNTY = { id: "marion", name: "Marion County" };
 const PRECINCTS = [
   { id: "precinct-12", name: "Precinct 12", ballots: 16, stageReached: "CERTIFIED" as Stage },
-  { id: "precinct-7", name: "Precinct 7", ballots: 12, stageReached: "TALLIED_PRECINCT" as Stage },
+  { id: "precinct-7", name: "Precinct 7", ballots: 12, stageReached: "CERTIFIED" as Stage },
+  { id: "precinct-3", name: "Precinct 3", ballots: 10, stageReached: "TALLIED_PRECINCT" as Stage },
 ];
 const CAST_DATE = "2026-11-03";
 const STAGE_DATES: Record<Stage, string> = {
@@ -183,13 +184,13 @@ export function lookup(input: string): TrackView | null {
 /** A few codes judges can try, one per interesting outcome. */
 export function sampleCodes(): { code: string; note: string }[] {
   const { ballots } = getElection();
-  const certified = ballots.find((b) => b.status === "CERTIFIED")!;
+  const certified = ballots.filter((b) => b.status === "CERTIFIED")[2]!;
   const tallied = ballots.find((b) => b.status === "TALLIED_PRECINCT")!;
   const challenged = ballots.find((b) => b.status === "CHALLENGED")!;
   const discarded = ballots.find((b) => b.status === "DISCARDED")!;
   return [
     { code: certified.trackingCode, note: "Precinct 12, certified" },
-    { code: tallied.trackingCode, note: "Precinct 7, counted at precinct" },
+    { code: tallied.trackingCode, note: "Precinct 3, counted at precinct" },
     { code: challenged.trackingCode, note: "Under review" },
     { code: discarded.trackingCode, note: "Not counted, reason shown" },
   ];

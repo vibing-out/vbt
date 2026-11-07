@@ -302,7 +302,7 @@ describe('Slack notification', () => {
   it('formats a bold title link, who added the label, and the newest comment as a quote block', () => {
     expect(slackMessage(notice())).toBe(
       [
-        '*<https://github.com/vibing-out/vbt/issues/12|#12 T-04 Schema>*',
+        '<!here> *<https://github.com/vibing-out/vbt/issues/12|#12 T-04 Schema>*',
         '`needs-human` added by warp-agent',
         '<https://github.com/vibing-out/vbt/issues/12#issuecomment-1|Newest comment> by warp-agent:',
         '> Which table holds voters?',
@@ -312,7 +312,7 @@ describe('Slack notification', () => {
   })
   it('says so when the issue has no comments or the label has no actor', () => {
     expect(slackMessage(notice({ comment: null, labeledBy: null }))).toBe(
-      ['*<https://github.com/vibing-out/vbt/issues/12|#12 T-04 Schema>*', '`needs-human` added by an unknown actor', '_No comments on the issue yet._'].join('\n'),
+      ['<!here> *<https://github.com/vibing-out/vbt/issues/12|#12 T-04 Schema>*', '`needs-human` added by an unknown actor', '_No comments on the issue yet._'].join('\n'),
     )
   })
   it('escapes &, < and > so ticket text cannot form links or close the quote', () => {
@@ -328,7 +328,9 @@ describe('Slack notification', () => {
     const text = slackMessage(notice({ title: 'Fix <a> & @here', comment: { author: 'x', body: '<!channel> 1 > 0', url: 'u' } }))
     expect(text).toContain('|#12 Fix &lt;a&gt; &amp; >*')
     expect(text).toContain('\n>  1 &gt; 0')
-    expect(text).not.toMatch(/<!|@here|@channel/)
+    // Only our own leading @here survives; nothing from the ticket text can mention anyone.
+    expect(text.startsWith('<!here> ')).toBe(true)
+    expect(text.slice('<!here> '.length)).not.toMatch(/<!|@here|@channel/)
   })
   it('trims the comment to 1,500 characters without splitting an emoji', () => {
     expect(trimmed('short')).toBe('short')

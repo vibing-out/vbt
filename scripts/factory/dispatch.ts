@@ -165,7 +165,8 @@ export function trimmed(text: string, limit = SLACK_QUOTE_LIMIT): string {
 // A bold title link, who added the label, then the newest comment as a quote block.
 export function slackMessage(notice: LabelNotice, label = NEEDS_HUMAN): string {
   const lines = [
-    `*<${notice.url}|#${notice.number} ${slackText(notice.title)}>*`,
+    // Our own @here so the team sees it; ticket text can never add one (slackText strips them).
+    `<!here> *<${notice.url}|#${notice.number} ${slackText(notice.title)}>*`,
     `\`${label}\` added by ${notice.labeledBy ? slackText(notice.labeledBy) : 'an unknown actor'}`,
   ]
   if (!notice.comment) return [...lines, '_No comments on the issue yet._'].join('\n')

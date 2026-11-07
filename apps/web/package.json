@@ -7,18 +7,20 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "pnpm --filter @vbt/crypto build && next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "typecheck": "pnpm --filter @vbt/crypto build && tsc --noEmit",
+    "test": "pnpm --filter @vbt/crypto build && vitest run",
     "test:e2e": "playwright test"
   },
   "dependencies": {
     "@flags-sdk/vercel": "^1.6.0",
     "@supabase/ssr": "0.12.7",
     "@supabase/supabase-js": "2.119.0",
+    "@vbt/crypto": "workspace:*",
     "@vbt/domain": "workspace:*",
+    "@vbt/events": "workspace:*",
     "@vbt/ui": "workspace:*",
     "flags": "^4.4.0",
     "next": "16.4.5",

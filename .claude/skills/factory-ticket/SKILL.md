@@ -8,7 +8,7 @@ description: Work a vbt ticket labeled `local` from a local Claude Code session,
 The Warp factory handles review, browser verification, auto-merge into the
 epic branch, and starting the next ticket. You only implement.
 
-1. **Pick and claim:** `gh issue list --label factory-ready --label local --no-assignee --state open`.
+1. **Pick and claim:** `gh issue list --label factory-ready --label local --search no:assignee --state open`.
    Take the one you were given, or the oldest. Claim it first with `gh issue edit <n> --add-assignee @me`. Never take one assigned to someone else.
 2. **Check readiness:**
    ```
@@ -33,10 +33,11 @@ epic branch, and starting the next ticket. You only implement.
 5. **Open the pull request:**
    ```
    gh pr create --base epic/<k> --label factory:vbt \
-     --title "<ticket title> (#<n>)" --body "Ticket: #<n> ..."
+     --title "T-NN <ticket title>" --body "Ticket: #<n> ..."
    ```
    Use "Ticket: #<n>", not "Closes", and list each criterion with how it is
-   met, plus the test results.
+   met, plus the test results. End the body with the `context-log` block
+   described in `CLAUDE.md`; check it with `node scripts/context.ts check < body.md`.
 6. **Answer review.** The factory posts one review comment per round. Fix
    the findings and push; each push re-triggers review. After a clean
    review and a passing verification, the factory queues the merge. Do not

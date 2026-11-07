@@ -1,4 +1,4 @@
-// Reads and writes the shared context log, with no dependencies. See README.md for the full
+// Reads and writes the shared context log, with no dependencies. See the vibing-out/vbt-context README for the full
 // interface and the context-log block format.
 //   node --env-file=agents/<id>.env context.ts log <decision|correction> <topic> <body> [ref-id]
 //   node --env-file=agents/<id>.env context.ts search [query] [--topic T] [--type X] [--since ISO] [--limit N] [--json]

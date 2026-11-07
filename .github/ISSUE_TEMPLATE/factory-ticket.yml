@@ -37,4 +37,4 @@ body:
     attributes:
       value: |
         **Dependencies:** set them with GitHub's "Blocked by" relationship in the issue sidebar, not in this text.
-        The factory starts this ticket only when every blocker is closed. Add the `factory-ready` label to a ticket with no blockers to start the chain.
+        The factory starts this ticket only when every blocker is closed. When the ticket is fully written, add the `queued` label; the dispatch script adds `factory-ready`.

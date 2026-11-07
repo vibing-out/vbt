@@ -1,2 +1,0 @@
-# Append-only log: when two branches each add lines, keep both instead of conflicting.
-docs/decisions.md merge=union

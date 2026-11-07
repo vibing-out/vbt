@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Checks that this machine matches the team setup. Run on both machines; any failure is drift.
-// Usage: npm run doctor            (all checks)
-//        npm run doctor -- --fast  (skips the slow MCP health check)
+// Usage: pnpm run doctor          (all checks; plain "pnpm doctor" runs pnpm's own command)
+//        pnpm run doctor --fast   (skips the slow MCP health check)
 import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 

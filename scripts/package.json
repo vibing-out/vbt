@@ -5,7 +5,7 @@
   "engines": { "node": ">=24" },
   "scripts": {
     "context": "node context.ts",
-    "check": "tsc -p ."
+    "typecheck": "tsc -p ."
   },
   "devDependencies": {
     "@types/node": "24.10.1",

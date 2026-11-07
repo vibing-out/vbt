@@ -24,7 +24,7 @@ import { check as checkReport, render as renderReport } from './report.ts'
 export const STAGES = ['triage', 'spec', 'implement', 'review'] as const
 export type Stage = (typeof STAGES)[number]
 export type Verdict = 'clean' | 'fixes' | 'needs-human'
-export const MAX_REVIEW_ROUNDS = 4
+export const MAX_REVIEW_ROUNDS = 2
 export const MAX_PARALLEL_TICKETS = 2
 const NEEDS_HUMAN = 'needs-human'
 const WORKTREE = '/tmp/ticket'
@@ -36,7 +36,8 @@ const READ_ONLY = { allowed: 'Read,Grep,Glob,WebSearch,WebFetch', disallowed: 'E
 export const TOOLS: Record<Stage, { allowed: string; disallowed: string }> = {
   triage: READ_ONLY,
   spec: READ_ONLY,
-  review: READ_ONLY,
+  // Review also runs three focused passes as subagents (Task); they inherit the disallowed list, so stay read-only.
+  review: { allowed: `${READ_ONLY.allowed},Task`, disallowed: READ_ONLY.disallowed },
   implement: { allowed: 'Read,Edit,Write,Glob,Grep,Bash', disallowed: 'Bash(git push:*),Bash(git commit:*),Bash(gh:*)' },
 }
 

@@ -7,13 +7,19 @@
 //   node scripts/factory/dispatch.ts context-check <pr>    on epic/* and main pull requests: validate the body
 //   node scripts/factory/dispatch.ts notify <issue>        on `needs-human`: post the issue to the team Slack channel
 //   node scripts/factory/dispatch.ts resume <issue>        on `needs-human` removed by a person: re-queue it with `check`
+//   node scripts/factory/dispatch.ts followup <issue> <title>  by the Foreman, body on stdin: open a follow-up ticket
+//                                                          in the same epic, blocked by <issue>, and queue it
+//   node scripts/factory/dispatch.ts sync-check            on a push to main: open a sync ticket for each open epic
+//                                                          pull request that now conflicts with main
 // Reads GITHUB_TOKEN and GITHUB_REPOSITORY (owner/name) from the environment, and SLACK_WEBHOOK_URL for
-// `notify` and `landed` (unset or empty means no Slack post). `check`, `landed` and `resume` call scripts/context.ts,
+// `notify` and `landed` (unset or empty means no Slack post). `check`, `landed`, `resume` and `sync-check` call scripts/context.ts,
 // which reads its own sign-in variables (see that file).
 import { spawn } from 'node:child_process'
+import { text } from 'node:stream/consumers'
 import { fileURLToPath } from 'node:url'
 
-const USAGE = 'usage: node dispatch.ts <check <issue> | landed <pr> | unblock <issue> | context-check <pr> | notify <issue> | resume <issue>>'
+const USAGE =
+  'usage: node dispatch.ts <check <issue> | landed <pr> | unblock <issue> | context-check <pr> | notify <issue> | resume <issue> | followup <issue> <title> (body on stdin) | sync-check>'
 const CONTEXT_TS = fileURLToPath(new URL('../context.ts', import.meta.url))
 const COMMENT_LIMIT = 60_000 // GitHub rejects comments over 65,536 characters
 const NEEDS_HUMAN = 'needs-human'
@@ -62,12 +68,19 @@ export interface GitHub {
   unlabeledBy(number: number, label: string): Promise<Actor | null>
   // The open pull request whose head is `epic/<n>` and whose base is `main`, or null when none is open.
   epicPull(epicNumber: number): Promise<EpicPull | null>
+  // Every open pull request from an `epic/<n>` branch into `main`, with its epic issue number.
+  openEpicPulls(): Promise<(EpicPull & { epic: number })[]>
+  // Whether the pull request merges into its base without conflicts: false when it conflicts, null when
+  // GitHub has not computed it yet (it does so lazily, after a push to either branch).
+  mergeable(pull: EpicPull): Promise<boolean | null>
   // Merges `main` into the pull request's branch when it is behind; false when it was already current.
   updateBranch(pull: EpicPull): Promise<boolean>
   markReady(pull: EpicPull): Promise<void>
   // Starts a workflow_dispatch run of `.github/workflows/<file>` on `ref`. Dispatches made with GITHUB_TOKEN
   // still start runs, unlike pushes, so this is how the epic branch's required checks run after update-branch.
   dispatchWorkflow(file: string, ref: string, inputs?: Record<string, string>): Promise<void>
+  // Opens an issue as a sub-issue of `epic`, blocked by `blockedBy` when given; resolves to its number.
+  createSubIssue(input: { title: string; body: string; epic: number; blockedBy?: number }): Promise<number>
 }
 
 // Runs scripts/context.ts with these arguments and this standard input; resolves to its stdout.
@@ -123,10 +136,21 @@ export function resumeSkipReason(issue: Issue, removedBy: Actor | null): string 
   return null
 }
 
-// The ticket id at the start of an issue title ("T-02 Domain package" -> "T-02"), used as the
-// context log's topic.
+// The ticket id at the start of an issue title ("T-02 Domain package" -> "T-02", a follow-up
+// "T-04a Judgment fixes" -> "T-04a"), used as the context log's topic.
 export function ticketId(title: string): string | null {
-  return /^([A-Z]+-\d+)\b/.exec(title.trim())?.[1] ?? null
+  return /^([A-Z]+-\d+[a-z]?)\b/.exec(title.trim())?.[1] ?? null
+}
+
+// The id for the next follow-up to a ticket: its base id plus the first letter no sibling uses
+// ("T-04" with "T-04a" taken -> "T-04b"). A follow-up to a follow-up continues the same series.
+export function followupId(original: string, siblings: string[]): string {
+  const id = ticketId(original)
+  if (!id) throw new Error(`"${original}" does not start with a ticket id`)
+  const base = id.replace(/[a-z]$/, '')
+  const taken = new Set(siblings.map(ticketId))
+  for (const letter of 'abcdefghijklmnopqrstuvwxyz') if (!taken.has(`${base}${letter}`)) return `${base}${letter}`
+  throw new Error(`${base} has no follow-up letters left`)
 }
 
 // The issue number from the "Ticket: #n" line of a pull request body. Exactly one distinct number.
@@ -140,7 +164,8 @@ export function ticketNumber(body: string): number {
 export function closedTicketError(ticket: IssueRef): string {
   return (
     `Ticket #${ticket.number} (${ticket.title}) is already closed, so this pull request would not show on its epic. ` +
-    `Open a follow-up ticket as a sub-issue of the same epic, blocked by #${ticket.number}, and put its number on the "Ticket:" line.`
+    `Open a follow-up ticket as a sub-issue of the same epic, blocked by #${ticket.number} ` +
+    `(node scripts/factory/dispatch.ts followup ${ticket.number} "<title>" < body.md), and put its number on the "Ticket:" line.`
   )
 }
 
@@ -213,6 +238,29 @@ export function trimmed(text: string, limit = SLACK_QUOTE_LIMIT): string {
 // The epic id at the start of an epic issue title ("E1 Foundation" -> "E1").
 export function epicId(title: string): string | null {
   return /^(E\d+)\b/.exec(title.trim())?.[1] ?? null
+}
+
+// A sync ticket merges `main` into `epic/<k>` when the two conflict. Its id is the next free "T-00<letter>"
+// in the epic, and the Foreman and Implement agents recognize it by this title.
+export const syncTitle = (epicNumber: number): string => `Sync epic/${epicNumber} with main`
+export const isSyncTicket = (title: string, epicNumber: number): boolean =>
+  /^T-00[a-z] (.+)$/.exec(title.trim())?.[1] === syncTitle(epicNumber)
+
+// What the sync ticket asks for. The procedure lives in the Foreman and Implement definitions; this is the
+// ticket's spec and acceptance criteria.
+export function syncBody(epicNumber: number, pull: EpicPull): string {
+  const branch = `sync/epic-${epicNumber}-main`
+  return [
+    `\`main\` and \`epic/${epicNumber}\` both changed the same lines, so epic pull request #${pull.number} conflicts and cannot merge.`,
+    '',
+    `Cut \`${branch}\` from \`origin/epic/${epicNumber}\`, merge \`origin/main\` into it, resolve each conflict keeping both sides' intent, and open a pull request into \`epic/${epicNumber}\`.`,
+    'It merges with a merge commit, never a squash: a squash drops main\'s history from the epic branch, and the same conflict comes back.',
+    '',
+    '## Acceptance criteria',
+    `- The branch holds a merge commit of \`origin/main\` into \`origin/epic/${epicNumber}\` (\`git merge-base --is-ancestor origin/main HEAD\` passes).`,
+    '- `pnpm lint`, `pnpm typecheck` and `pnpm test` pass on it.',
+    `- Once it merges, #${pull.number} no longer conflicts with \`main\`.`,
+  ].join('\n')
 }
 
 // The Slack post for an epic pull request that is ready for a person to approve into main.
@@ -348,24 +396,68 @@ export async function landed(number: number, deps: Deps): Promise<void> {
   }
 }
 
+// When the epic pull request conflicts with `main`, opens a sync ticket in the epic (unless one is already
+// open), queues it and runs `check` on it in-process, since a label added with GITHUB_TOKEN starts no
+// workflow. The sync ticket keeps the epic waiting until its merge commit lands. Update-branch can't
+// resolve conflicts, so this is the only way the epic pull request becomes mergeable without a person.
+export async function syncEpic(
+  epic: Issue,
+  pull: EpicPull,
+  deps: Deps,
+): Promise<'clean' | 'unknown' | 'in-flight' | 'opened'> {
+  const { github, log = console.log } = deps
+  const mergeable = await github.mergeable(pull)
+  if (mergeable) return 'clean'
+  if (mergeable === null) {
+    log(`epic #${epic.number}: GitHub has not computed whether #${pull.number} conflicts; the next landed or push to main re-checks`)
+    return 'unknown'
+  }
+  return openSync(epic, pull, deps)
+}
+
+async function openSync(epic: Issue, pull: EpicPull, deps: Deps): Promise<'in-flight' | 'opened'> {
+  const { github, log = console.log } = deps
+  const inFlight = epic.subIssues.find((s) => s.state === 'OPEN' && isSyncTicket(s.title, epic.number))
+  if (inFlight) {
+    log(`epic #${epic.number}: #${pull.number} conflicts with main; sync ticket #${inFlight.number} is already open`)
+    return 'in-flight'
+  }
+  const id = followupId('T-00', epic.subIssues.map((s) => s.title))
+  const created = await github.createSubIssue({ title: `${id} ${syncTitle(epic.number)}`, body: syncBody(epic.number, pull), epic: epic.number })
+  await github.addLabels(created, ['queued'])
+  log(`epic #${epic.number}: #${pull.number} conflicts with main; opened sync ticket #${created} (${id})`)
+  // Dispatch first: a label added with GITHUB_TOKEN starts no workflow, so nothing else runs `check`, and a
+  // failure after this point must not leave the ticket queued but never dispatched (#78).
+  await check(created, deps)
+  // A courtesy note on the epic pull request; failing to post it doesn't undo the dispatched ticket.
+  try {
+    await github.comment(pull.number, `This pull request conflicts with \`main\`. Opened #${created} to merge \`main\` into \`epic/${epic.number}\`.`)
+  } catch (err) {
+    log(`epic #${epic.number}: could not comment on #${pull.number}: ${err instanceof Error ? err.message : err}`)
+  }
+  return 'opened'
+}
+
 // Once every ticket in the epic is closed, brings the epic pull request up to date with `main` (whose
 // ruleset requires it), dispatches its required checks on the new head, marks it ready for review,
-// comments and posts to Slack. A pull request that is
+// comments and posts to Slack. First, at every landing, a conflict with `main` opens a sync ticket
+// (see syncEpic): the earlier the conflict is caught, the smaller it is. A pull request that is
 // already ready was handled by an earlier run, so nothing is repeated. Failures are logged, not thrown:
 // the ticket has already merged and closed, and a person can mark the pull request ready by hand.
 export async function epicReady(
   epicNumber: number,
   deps: Deps,
-): Promise<'waiting' | 'no-pull' | 'already-ready' | 'ready' | 'failed'> {
+): Promise<'conflict' | 'waiting' | 'no-pull' | 'already-ready' | 'ready' | 'failed'> {
   const { github, log = console.log } = deps
   try {
     const epic = await github.issue(epicNumber)
+    const pull = await github.epicPull(epicNumber)
+    if (pull && ['in-flight', 'opened'].includes(await syncEpic(epic, pull, deps))) return 'conflict'
     const open = epic.subIssues.filter((s) => s.state !== 'CLOSED')
     if (open.length) {
       log(`epic #${epicNumber}: waiting on ${open.map((s) => `#${s.number}`).join(', ')}`)
       return 'waiting'
     }
-    const pull = await github.epicPull(epicNumber)
     if (!pull) {
       log(`epic #${epicNumber}: every ticket is closed, but no open pull request from epic/${epicNumber} into main`)
       return 'no-pull'
@@ -374,7 +466,15 @@ export async function epicReady(
       log(`epic #${epicNumber}: pull request #${pull.number} is already ready for review`)
       return 'already-ready'
     }
-    const updated = await github.updateBranch(pull)
+    let updated: boolean
+    try {
+      updated = await github.updateBranch(pull)
+    } catch (err) {
+      // GitHub may not have computed the conflict when syncEpic asked; update-branch then reports it.
+      if (!/conflict/i.test(err instanceof Error ? err.message : String(err))) throw err
+      await openSync(epic, pull, deps)
+      return 'conflict'
+    }
     // The required checks `check` (ci.yml) and `context-check` (factory.yml) must pass on the head commit.
     // An update-branch push made with GITHUB_TOKEN starts neither, so both are dispatched on the branch.
     // Dispatched even when the branch was already current: the head may still lack runs of its own.
@@ -441,6 +541,24 @@ export async function unblock(number: number, deps: Deps): Promise<void> {
   if (failures.length) throw new Error(`re-check failed for ${failures.join('; ')}`)
 }
 
+// On every push to `main`: each open epic pull request that now conflicts with it gets a sync ticket.
+// Each epic is handled on its own, so one failure doesn't hide another epic's conflict.
+export async function syncCheck(deps: Deps): Promise<void> {
+  const { github, log = console.log } = deps
+  const pulls = await github.openEpicPulls()
+  const failures: string[] = []
+  for (const pull of pulls) {
+    try {
+      const result = await syncEpic(await github.issue(pull.epic), pull, deps)
+      log(`epic #${pull.epic}: #${pull.number} ${result}`)
+    } catch (err) {
+      failures.push(`epic #${pull.epic}: ${err instanceof Error ? err.message : err}`)
+    }
+  }
+  log(`checked ${pulls.length} epic pull request(s) for conflicts with main`)
+  if (failures.length) throw new Error(`sync check failed for ${failures.join('; ')}`)
+}
+
 export async function contextCheck(number: number, deps: Deps): Promise<void> {
   const { github, context, log = console.log } = deps
   const pr = await github.pull(number)
@@ -453,6 +571,26 @@ export async function contextCheck(number: number, deps: Deps): Promise<void> {
     }
   }
   log(await context(['check'], pr.body))
+}
+
+// Work a ticket needs after it closed gets a ticket of its own, so it shows on the epic: a sub-issue of
+// the same epic, blocked by the original, labeled `queued` last so `check` sees both links and
+// dispatches it like any other ticket. Resolves to the new issue's number.
+export async function followup(number: number, title: string, body: string, deps: Deps): Promise<number> {
+  const { github, log = console.log } = deps
+  const original = await github.issue(number)
+  if (!original.parent) throw new Error(`#${number} has no parent epic, so a follow-up would not show on one`)
+  if (!title.trim()) throw new Error('a follow-up needs a title')
+  const id = followupId(original.title, original.parent.subIssues.map((s) => s.title))
+  const created = await github.createSubIssue({
+    title: `${id} ${title.trim()}`,
+    body: `Follow-up to #${number} (${original.title}).\n\n${body.trim()}`.trim(),
+    epic: original.parent.number,
+    blockedBy: number,
+  })
+  await github.addLabels(created, ['queued'])
+  log(`#${created}: ${id}, follow-up to #${number} in epic #${original.parent.number}, queued`)
+  return created
 }
 
 // The webhook URL inside whatever was pasted into the secret: people paste quotes, whitespace, or the
@@ -526,7 +664,12 @@ const UNLABELED_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
 type RawRef = { number: number; title: string; state: 'OPEN' | 'CLOSED'; labels: { nodes: { name: string }[] } }
 const ref = (raw: RawRef): IssueRef => ({ number: raw.number, title: raw.title, state: raw.state, labels: raw.labels.nodes.map((l) => l.name) })
 
-export function restGitHub(token: string, repository: string): GitHub {
+// `sleep` waits between polls of a pull request's mergeable state; replaceable for tests.
+export function restGitHub(
+  token: string,
+  repository: string,
+  { sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms)) }: { sleep?: (ms: number) => Promise<void> } = {},
+): GitHub {
   const [owner, name] = repository.split('/')
   if (!owner || !name) throw new Error(`GITHUB_REPOSITORY must be owner/name, not "${repository}"`)
   const headers = {
@@ -656,6 +799,27 @@ export function restGitHub(token: string, repository: string): GitHub {
       const found = raw[0]
       return found ? { number: found.number, url: found.html_url, draft: found.draft, nodeId: found.node_id, head: found.head.ref } : null
     },
+    async openEpicPulls() {
+      const raw = (await call('GET', `/repos/${owner}/${name}/pulls?state=open&base=main&per_page=100`)) as {
+        number: number; html_url: string; draft: boolean; node_id: string; head: { ref: string; repo: { full_name: string } | null }
+      }[]
+      return raw.flatMap((p) => {
+        const epic = /^epic\/(\d+)$/.exec(p.head.ref)?.[1]
+        // Only this repository's own epic branches; a fork's branch named epic/<n> is not an epic.
+        if (!epic || p.head.repo?.full_name !== `${owner}/${name}`) return []
+        return [{ number: p.number, url: p.html_url, draft: p.draft, nodeId: p.node_id, head: p.head.ref, epic: Number(epic) }]
+      })
+    },
+    async mergeable(pull) {
+      // GitHub computes `mergeable` in the background after a push and returns null until it has; the first
+      // GET starts the computation. Six tries over about 15 seconds, then null (unknown).
+      for (let attempt = 0; attempt < 6; attempt++) {
+        if (attempt) await sleep(3_000)
+        const raw = (await call('GET', `/repos/${owner}/${name}/pulls/${pull.number}`)) as { mergeable: boolean | null }
+        if (raw.mergeable !== null) return raw.mergeable
+      }
+      return null
+    },
     async updateBranch(pull) {
       // How many commits `main` has that the epic branch lacks; the update call is only needed when any.
       const compare = (await call('GET', `/repos/${owner}/${name}/compare/${pull.head}...main`)) as { ahead_by: number }
@@ -672,6 +836,15 @@ export function restGitHub(token: string, repository: string): GitHub {
     },
     async dispatchWorkflow(file, ref, inputs) {
       await call('POST', `/repos/${owner}/${name}/actions/workflows/${encodeURIComponent(file)}/dispatches`, { ref, ...(inputs && { inputs }) })
+    },
+    async createSubIssue({ title, body, epic, blockedBy }) {
+      // The sub-issue and dependency endpoints take issue ids, not numbers.
+      const created = (await call('POST', issues, { title, body })) as { id: number; number: number }
+      await call('POST', `${issues}/${epic}/sub_issues`, { sub_issue_id: created.id })
+      if (blockedBy === undefined) return created.number
+      const blocker = (await call('GET', `${issues}/${blockedBy}`)) as { id: number }
+      await call('POST', `${issues}/${created.number}/dependencies/blocked_by`, { issue_id: blocker.id })
+      return created.number
     },
   }
 }
@@ -694,7 +867,8 @@ export const runContext: ContextLog = (args, input) =>
 if (import.meta.main) {
   const [command, arg, ...extra] = process.argv.slice(2)
   try {
-    if (!arg || !/^\d+$/.test(arg) || extra.length) throw new Error(USAGE)
+    if (command === 'sync-check' ? arg !== undefined : !arg || !/^\d+$/.test(arg) || (extra.length && command !== 'followup'))
+      throw new Error(USAGE)
     const token = process.env.GITHUB_TOKEN
     if (!token) throw new Error('GITHUB_TOKEN is not set')
     const deps: Deps = {
@@ -708,6 +882,8 @@ if (import.meta.main) {
     else if (command === 'context-check') await contextCheck(Number(arg), deps)
     else if (command === 'notify') await notify(Number(arg), deps)
     else if (command === 'resume') await resume(Number(arg), deps)
+    else if (command === 'sync-check') await syncCheck(deps)
+    else if (command === 'followup') await followup(Number(arg), extra.join(' '), await text(process.stdin), deps)
     else throw new Error(USAGE)
   } catch (err) {
     console.error(err instanceof Error ? err.message : err)

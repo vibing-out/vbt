@@ -187,6 +187,12 @@ jobs:
     # One at a time, so two quick pushes to main can't open two sync tickets for the same epic.
     concurrency:
       group: factory-sync-check
+    # pull-requests: write to comment the sync ticket's link on the epic pull request (an issue comment on a
+    # pull request needs it); issues: write to open and queue the sync ticket.
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

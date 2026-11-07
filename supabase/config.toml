@@ -17,3 +17,8 @@ major_version = 17
 # Local and test databases only; `supabase db push` does not run it.
 enabled = true
 sql_paths = ["./seed.sql"]
+
+# T-20: officials sign in with email + TOTP (multi-factor). Hosted projects have TOTP on by default.
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true

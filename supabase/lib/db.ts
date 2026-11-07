@@ -67,9 +67,29 @@ export async function ensureRoles(
 }
 
 /**
- * Plain Postgres lacks Supabase's API roles. Create anon, authenticated and service_role when missing
- * and copy Supabase's default privileges (everything granted to all three), so the migrations' revokes
- * are tested against the same starting point as production. A real Supabase database is left alone.
+ * The parts of Supabase Auth's schema the migrations and RLS policies use: auth.users (referenced by
+ * official_roles) and auth.uid() / auth.jwt(), which read the request's JWT claims the way Supabase's
+ * own functions do. PostgREST sets request.jwt.claims per request; tests set it with set_config.
+ * Per database, so concurrent scratch databases never race on it.
+ */
+export const AUTH_SCHEMA_STUB = `
+  create schema if not exists auth;
+  create table if not exists auth.users (id uuid primary key);
+  create or replace function auth.jwt() returns jsonb
+    language sql stable
+    as $$ select coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb $$;
+  create or replace function auth.uid() returns uuid
+    language sql stable
+    as $$ select nullif(auth.jwt() ->> 'sub', '')::uuid $$;
+  grant usage on schema auth to anon, authenticated, service_role;
+  grant execute on function auth.jwt(), auth.uid() to anon, authenticated, service_role;
+`;
+
+/**
+ * Plain Postgres lacks Supabase's API roles and auth schema. Create anon, authenticated and
+ * service_role when missing and copy Supabase's default privileges (everything granted to all three),
+ * so the migrations' revokes are tested against the same starting point as production, then stub the
+ * auth schema (AUTH_SCHEMA_STUB). A real Supabase database is left alone.
  * Safe to call from many connections at once (parallel Vitest files).
  */
 export async function bootstrapSupabaseRoles(client: pg.Client): Promise<void> {
@@ -85,6 +105,7 @@ export async function bootstrapSupabaseRoles(client: pg.Client): Promise<void> {
     alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
     alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
   `);
+  await client.query(AUTH_SCHEMA_STUB);
 }
 
 async function runFile(client: pg.Client, path: string): Promise<void> {

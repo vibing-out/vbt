@@ -27,6 +27,7 @@ test("greeting is the product database value @smoke", async ({ page }) => {
 
 // The Playwright web server runs `next build` first, so the client bundle exists here.
 test("client bundle holds nothing from the server-only database modules @smoke", async () => {
+  test.skip(!!process.env.PLAYWRIGHT_BASE_URL, "needs the local build; PLAYWRIGHT_BASE_URL targets a deployed app");
   const { readdirSync, readFileSync } = await import("node:fs");
   const { join } = await import("node:path");
   const dir = join(import.meta.dirname, "..", ".next", "static");
@@ -34,6 +35,6 @@ test("client bundle holds nothing from the server-only database modules @smoke",
   expect(files.length).toBeGreaterThan(0);
   for (const f of files) {
     const source = readFileSync(join(f.parentPath, f.name), "utf8");
-    expect(source, f.name).not.toMatch(/CONTEXT_|search_context|grant_type=password|app_info/);
+    expect(source, f.name).not.toMatch(/CONTEXT_|search_context|grant_type=password|app_info|official_roles/);
   }
 });

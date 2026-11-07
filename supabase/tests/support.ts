@@ -61,5 +61,13 @@ export function asRole(
   return asRoleSteps(client, role, [{ sql, params }]);
 }
 
+/**
+ * A step that sets the request's JWT claims for the rest of the transaction, as PostgREST does for each
+ * request, so auth.uid() and auth.jwt() (and the RLS policies that use them) see these claims.
+ */
+export function withClaims(claims: Record<string, unknown>): { sql: string; params: unknown[] } {
+  return { sql: "select set_config('request.jwt.claims', $1, true)", params: [JSON.stringify(claims)] };
+}
+
 export const PERMISSION_DENIED = /permission denied/;
 export const INSERT_ONLY = /is insert-only/;

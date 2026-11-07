@@ -1,0 +1,21 @@
+name: Epic
+description: A batch of tickets that ships to main together, after one human review.
+title: "[epic] "
+labels: [epic]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Add tickets as **sub-issues** of this epic. The factory builds them on the branch `epic/<this issue's number>`, in dependency order, and opens one pull request into main when every sub-issue is closed. A human approves that pull request; merging it closes this epic.
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What a user can do once the whole epic ships.
+    validations:
+      required: true
+  - type: textarea
+    id: review-focus
+    attributes:
+      label: Review focus
+      description: What the human approving the epic should look at hardest (data handling, a risky migration, a new public page).

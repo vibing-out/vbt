@@ -1,0 +1,14 @@
+{
+  "name": "vbt-scripts",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "context": "node context.ts",
+    "check": "tsc -p ."
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3"
+  }
+}

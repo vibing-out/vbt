@@ -1,0 +1,8 @@
+.DS_Store
+*.log
+node_modules/
+.vercel/
+.env
+.env.local
+# Per-agent sign-in files for scripts/context.ts hold passwords.
+agents/

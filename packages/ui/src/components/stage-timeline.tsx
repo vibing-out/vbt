@@ -1,8 +1,11 @@
-import { bodyText, dateOnly, iconSize, type Mode } from "../lib/mode";
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { bodyText, dateOnly, smallText, type Mode } from "../lib/mode";
 import { cn } from "../lib/utils";
-import { ADMIN_LABELS, STAGES, STATUS_ICONS, VOTER_LABELS, type ReasonStatus, type Stage } from "../status";
-import { CopyCode } from "./copy-code";
-import { Icon } from "./icon";
+import { STAGE_LABELS, STAGES, type Stage } from "../status";
+import { CodeText } from "./code-text";
+import { Icon, type IconName } from "./icon";
 import { StatusBadge } from "./status-badge";
 
 export type StageState = "done" | "current" | "upcoming";
@@ -10,269 +13,312 @@ export type StageState = "done" | "current" | "upcoming";
 export interface StageEntry {
   stage: Stage;
   state: StageState;
-  /** A date only, such as "Nov 3". Never a time of day: that would reveal casting order. */
+  /** Done or current: the date reached, such as "Nov 3". Never a time of day. */
   date?: string;
+  /** Upcoming: the expected date, shown as "Expected by Nov 18". Never a time of day. */
+  expected?: string;
 }
 
-/** The ballot left the four-stage path. Challenged and Discarded need their reason. */
-export type OffPath = { status: ReasonStatus; reason: string } | { status: "SPOILED"; reason?: string };
+/**
+ * The ballot left the four-stage path (StageTimeline README, Exceptions). CHALLENGED and
+ * DISCARDED carry their reason; SPOILED replaces the timeline with its badge and, if known, a link
+ * to the replacement ballot.
+ */
+export type OffPath =
+  | { status: "CHALLENGED"; reason: string }
+  | { status: "DISCARDED"; reason: string; date?: string }
+  | { status: "SPOILED"; replacement?: { code: string; href: string } };
 
-interface CommonProps {
-  mode?: Mode;
+export interface StageTimelineProps {
   /** Stage states and dates. Rendered in the fixed order; a stage left out is upcoming. */
   stages: readonly StageEntry[];
   offPath?: OffPath;
-  /** The stage whose batch just landed: only its circle animates (200ms, none under reduced motion). */
-  justCompleted?: Stage;
-  /** Replaces stage names (for Spanish strings, say). */
+  /** "raised" on light cards; "hero" inside the dark hero card, horizontal at 480px wide and up. */
+  surface?: "raised" | "hero";
+  mode?: Mode;
+  /** Four upcoming rings and skeleton labels; never a spinner. */
+  loading?: boolean;
+  /** Replaces stage labels (for Spanish strings, say). */
   labels?: Partial<Record<Stage, string>>;
   className?: string;
 }
 
-export type HeroTimelineProps = CommonProps & {
-  form: "hero";
-  /** The current status as one plain-language sentence, e.g. "Your ballot is counted". */
-  headline: string;
-  /** One sentence naming the next step and roughly when. */
-  nextStep: string;
-  /** Shown exactly as passed in. */
-  code: string;
-  county: string;
-  precinct: string;
-  /** When an official's batch last landed, e.g. "9:42 PM": the only time shown. */
-  updatedAt: string;
-};
+type NodeKind = "done" | "current" | "upcoming" | "challenged" | "discarded";
 
-export type HistoryTimelineProps = CommonProps & {
-  form: "history";
-  /** Note carried by the current row. */
-  nextStep?: string;
-};
-
-export type CompactTimelineProps = CommonProps & { form: "compact" };
-
-export type StageTimelineProps = HeroTimelineProps | HistoryTimelineProps | CompactTimelineProps;
-
-interface ResolvedStage {
-  stage: Stage;
-  state: StageState;
-  date?: string;
+interface Node {
+  key: string;
+  kind: NodeKind;
+  /** Stage this node stands for; undefined for the terminal discarded node. */
+  stage?: Stage;
   label: string;
-  isNew: boolean;
+  /** Shown under the label: a date, "Expected by ...", or the reason. */
+  detail?: string;
+  /** The item's full accessible text. */
+  spoken: string;
 }
 
-/**
- * The four stages in fixed order. Off the path, every stage after the last completed one shows as
- * upcoming: a stage is never colored with a status color.
- */
-function resolveStages(props: CommonProps, mode: Mode): ResolvedStage[] {
-  const names = mode === "admin" ? ADMIN_LABELS : VOTER_LABELS;
-  return STAGES.map((stage) => {
+const TOTAL = STAGES.length;
+
+/** Nodes that mark where the ballot is: "Now" and aria-current="step". */
+const AT: ReadonlySet<NodeKind> = new Set(["current", "challenged", "discarded"]);
+
+function spokenFor(n: number, label: string, state: string, detail?: string): string {
+  return `Stage ${n} of ${TOTAL}, ${label}, ${state}${detail ? `, ${detail}` : ""}.`;
+}
+
+function resolveNodes(props: StageTimelineProps): Node[] {
+  const { offPath } = props;
+  const entries = STAGES.map((stage, i) => {
     const entry = props.stages.find((s) => s.stage === stage);
-    let state: StageState = entry?.state ?? "upcoming";
-    if (props.offPath && state !== "done") state = "upcoming";
     return {
       stage,
-      state,
+      n: i + 1,
+      state: entry?.state ?? ("upcoming" as StageState),
       date: dateOnly(entry?.date, `The ${stage} date`),
-      label: props.labels?.[stage] ?? names[stage],
-      isNew: props.justCompleted === stage && state === "done",
+      expected: dateOnly(entry?.expected, `The ${stage} expected date`),
+      label: props.labels?.[stage] ?? STAGE_LABELS[stage],
     };
   });
+
+  const plain = (e: (typeof entries)[number], kind: "done" | "current" | "upcoming"): Node => {
+    const detail = kind === "upcoming" ? (e.expected ? `Expected by ${e.expected}` : undefined) : e.date;
+    const spokenDetail = kind === "upcoming" && e.expected ? `expected by ${e.expected}` : detail;
+    return { key: e.stage, kind, stage: e.stage, label: e.label, detail, spoken: spokenFor(e.n, e.label, kind, spokenDetail) };
+  };
+
+  if (offPath?.status === "CHALLENGED") {
+    // The stage held before the challenge: the current one, or else the last one done.
+    const current = entries.findIndex((e) => e.state === "current");
+    const held = current >= 0 ? current : entries.map((e) => e.state).lastIndexOf("done");
+    return entries.map((e, i) => {
+      if (i === held) {
+        return {
+          key: e.stage,
+          kind: "challenged",
+          stage: e.stage,
+          label: "Under review",
+          detail: offPath.reason,
+          spoken: spokenFor(e.n, e.label, "under review", offPath.reason),
+        };
+      }
+      return plain(e, i < held ? "done" : "upcoming");
+    });
+  }
+
+  if (offPath?.status === "DISCARDED") {
+    // The track stops at the last reached stage; later stages are removed, not greyed.
+    const reached = entries.filter((e) => e.state !== "upcoming").map((e) => plain(e, "done"));
+    const date = dateOnly(offPath.date, "The discarded date");
+    const label = `Not counted: ${offPath.reason}`;
+    return [
+      ...reached,
+      { key: "DISCARDED", kind: "discarded", label, detail: date, spoken: `${label}${date ? `, ${date}` : ""}.` },
+    ];
+  }
+
+  return entries.map((e) => plain(e, e.state));
 }
 
-const STATE_WORD: Record<StageState, string> = { done: "done", current: "current", upcoming: "upcoming" };
+// Colors by surface (StageTimeline README, Anatomy). The done check and exception icons are cut
+// out: drawn in the surface color. On the hero, status colors fail on surface-inverse in light
+// (2.11:1 to 2.76:1), so challenged and discarded dots use on-inverse; the icon and word carry them.
+const TONE = {
+  raised: {
+    dot: {
+      done: "bg-ink text-surface-raised",
+      current: "bg-accent-mark ring-6 ring-accent-tint",
+      upcoming: "border-2 border-line-strong bg-surface-raised",
+      challenged: "bg-status-challenged text-surface-raised",
+      discarded: "bg-status-discarded text-surface-raised",
+    },
+    label: {
+      done: "text-ink-muted",
+      current: "font-semibold text-accent-text",
+      upcoming: "text-ink-muted",
+      challenged: "font-semibold text-status-challenged",
+      discarded: "font-semibold text-status-discarded",
+    },
+    now: "text-ink",
+    detail: "text-ink-muted",
+    trackFilled: "bg-stage-done",
+    trackEmpty: "bg-line",
+    skeleton: "bg-surface-sunk",
+    link: "text-ink focus-visible:outline-focus",
+  },
+  hero: {
+    dot: {
+      done: "bg-on-inverse text-surface-inverse",
+      current: "bg-brand-orange ring-6 ring-brand-orange/30",
+      upcoming: "border-2 border-on-inverse-muted bg-surface-inverse",
+      challenged: "bg-on-inverse text-surface-inverse",
+      discarded: "bg-on-inverse text-surface-inverse",
+    },
+    label: {
+      done: "text-on-inverse-muted",
+      current: "font-semibold text-brand-orange",
+      upcoming: "text-on-inverse-muted",
+      challenged: "font-semibold text-on-inverse",
+      discarded: "font-semibold text-on-inverse",
+    },
+    now: "text-on-inverse",
+    detail: "text-on-inverse-muted",
+    trackFilled: "bg-on-inverse-muted",
+    trackEmpty: "bg-on-inverse-muted/30",
+    skeleton: "bg-on-inverse-muted/30",
+    link: "text-on-inverse focus-visible:outline-focus-inverse",
+  },
+} as const;
 
-/** Only the newly completed circle animates. */
-const NEW_MOTION =
-  "transition-colors duration-base ease-out animate-in fade-in zoom-in-75 motion-reduce:transition-none motion-reduce:animate-none";
+const DOT_ICON: Partial<Record<NodeKind, IconName>> = { done: "check", challenged: "flag", discarded: "x" };
 
-function OffPathBadge({ offPath, mode }: { offPath: OffPath; mode: Mode }) {
-  return offPath.status === "SPOILED" ? (
-    <StatusBadge status="SPOILED" reason={offPath.reason} mode={mode} />
-  ) : (
-    <StatusBadge status={offPath.status} reason={offPath.reason} mode={mode} />
-  );
-}
+// Horizontal layout, for the hero card at 480px (30rem) wide and up. Written out in full so
+// Tailwind finds every class.
+const HORIZONTAL = {
+  root: "@container",
+  ol: "@min-[30rem]:grid @min-[30rem]:auto-cols-fr @min-[30rem]:grid-flow-col",
+  li: "@min-[30rem]:flex-col @min-[30rem]:items-center @min-[30rem]:gap-2 @min-[30rem]:px-1 @min-[30rem]:pb-0 @min-[30rem]:text-center",
+  dotBox: "@min-[30rem]:h-4",
+  track:
+    "@min-[30rem]:bottom-auto @min-[30rem]:left-1/2 @min-[30rem]:h-0.5 @min-[30rem]:w-full @min-[30rem]:translate-x-0 @min-[30rem]:-translate-y-1/2",
+  fill: "@min-[30rem]:origin-left",
+  fillEmpty: "@min-[30rem]:scale-x-0 @min-[30rem]:scale-y-100",
+  text: "@min-[30rem]:items-center",
+};
 
-function rootProps(form: StageTimelineProps["form"], mode: Mode, offPath: OffPath | undefined) {
-  return {
+/** Where a ballot is on the four stages, with the current stage in orange and marked "Now". */
+export function StageTimeline(props: StageTimelineProps) {
+  const { offPath, surface = "raised", mode = "voter", loading = false, className } = props;
+  const tone = TONE[surface];
+  const hero = surface === "hero";
+  const nodes = loading ? [] : resolveNodes(props);
+
+  // Live update: announce a newly reached stage once, politely.
+  const currentStage = nodes.find((n) => n.kind === "current")?.stage;
+  const previous = useRef(currentStage);
+  const [announcement, setAnnouncement] = useState("");
+  useEffect(() => {
+    const before = previous.current;
+    previous.current = currentStage;
+    if (!currentStage || !before || currentStage === before) return;
+    if (STAGES.indexOf(currentStage) > STAGES.indexOf(before)) {
+      setAnnouncement(`Your ballot moved to ${props.labels?.[currentStage] ?? STAGE_LABELS[currentStage]}.`);
+    }
+  }, [currentStage, props.labels]);
+
+  const root = {
     "data-component": "timeline",
-    "data-form": form,
+    "data-surface": surface,
     "data-mode": mode,
     "data-off-path": offPath?.status,
   };
-}
 
-export function StageTimeline(props: StageTimelineProps) {
-  const mode = props.mode ?? "voter";
-  const stages = resolveStages(props, mode);
-  if (props.form === "hero") return <Hero {...props} mode={mode} stages_={stages} />;
-  if (props.form === "history") return <History {...props} mode={mode} stages_={stages} />;
-  return <Compact {...props} mode={mode} stages_={stages} />;
-}
-
-type Resolved<P> = P & { mode: Mode; stages_: ResolvedStage[] };
-
-function Hero({ mode, stages_, offPath, headline, nextStep, code, county, precinct, updatedAt, className }: Resolved<HeroTimelineProps>) {
-  const circle: Record<StageState, string> = {
-    done: "bg-on-inverse text-surface-inverse",
-    current: "bg-brand-orange text-on-accent ring-4 ring-brand-orange/30",
-    upcoming: "border-2 border-on-inverse-muted text-on-inverse-muted",
-  };
-  return (
-    <section
-      {...rootProps("hero", mode, offPath)}
-      aria-label="Ballot status"
-      className={cn(
-        "vbt-timeline vbt-hero flex flex-col gap-6 rounded-lg bg-surface-inverse p-4 text-on-inverse shadow-overlay md:p-6",
-        className,
-      )}
-    >
-      <div className="flex flex-col gap-3">
-        <p className="text-label uppercase text-on-inverse-muted">
-          {county} · {precinct} · Updated {updatedAt}
-        </p>
-        <h2 className="text-display">{headline}</h2>
-        {offPath ? (
-          <div>
-            <OffPathBadge offPath={offPath} mode={mode} />
-          </div>
+  if (offPath?.status === "SPOILED" && !loading) {
+    // SPOILED is not a stage: no timeline, just the badge and the replacement ballot if known.
+    return (
+      <div {...root} className={cn("vbt-timeline flex flex-col items-start gap-2", className)}>
+        <StatusBadge status="SPOILED" mode={mode} />
+        {offPath.replacement ? (
+          <a
+            href={offPath.replacement.href}
+            className={cn(
+              "inline-flex flex-wrap items-center gap-x-2 underline underline-offset-4",
+              "focus-visible:outline-2 focus-visible:outline-offset-2",
+              mode === "voter" ? "min-h-11" : "min-h-6",
+              bodyText(mode),
+              tone.link,
+            )}
+          >
+            Track your replacement ballot
+            <CodeText code={offPath.replacement.code} mode={mode} size="inline" />
+          </a>
         ) : null}
-        <p className={bodyText(mode)}>{nextStep}</p>
       </div>
-      <ol className="flex items-center" aria-label="Stages">
-        {stages_.map((s, i) => (
-          <li
-            key={s.stage}
-            data-stage={s.stage}
-            data-state={s.state}
-            aria-current={s.state === "current" ? "step" : undefined}
-            className={cn("flex items-center", i < stages_.length - 1 && "flex-1")}
-          >
-            <span
-              role="img"
-              aria-label={`${s.label}, ${STATE_WORD[s.state]}`}
-              data-new={s.isNew ? "true" : undefined}
-              className={cn(
-                "flex size-10 shrink-0 items-center justify-center rounded-pill",
-                circle[s.state],
-                s.isNew && NEW_MOTION,
-              )}
-            >
-              <Icon name={STATUS_ICONS[s.stage]} size={iconSize(mode)} />
-            </span>
-            {i < stages_.length - 1 ? (
-              <span aria-hidden="true" className="mx-2 h-0.5 flex-1 rounded-pill bg-on-inverse-muted" />
-            ) : null}
-          </li>
-        ))}
-      </ol>
-      <CopyCode code={code} mode={mode} />
-    </section>
-  );
-}
+    );
+  }
 
-function History({ mode, stages_, offPath, nextStep, className }: Resolved<HistoryTimelineProps>) {
-  const circle: Record<StageState, string> = {
-    done: "bg-stage-done text-ink",
-    current: "bg-brand-orange text-on-accent",
-    upcoming: "border-2 border-line-strong bg-surface-raised text-ink-muted",
-  };
-  const name: Record<StageState, string> = {
-    done: "text-ink",
-    current: "text-accent-text",
-    upcoming: "text-ink-muted",
-  };
+  const shown: Node[] = loading
+    ? STAGES.map((stage, i) => ({
+        key: stage,
+        kind: "upcoming",
+        stage,
+        label: "",
+        spoken: `Stage ${i + 1} of ${TOTAL}, loading.`,
+      }))
+    : nodes;
   const text = bodyText(mode);
-  return (
-    <div
-      {...rootProps("history", mode, offPath)}
-      className={cn(
-        "vbt-timeline vbt-card vbt-history flex flex-col gap-3 rounded-md bg-surface-raised p-4 text-ink shadow-card md:p-6",
-        className,
-      )}
-    >
-      {offPath ? (
-        <div>
-          <OffPathBadge offPath={offPath} mode={mode} />
-        </div>
-      ) : null}
-      <ol className="flex flex-col gap-1" aria-label="Stages">
-        {stages_.map((s) => (
-          <li
-            key={s.stage}
-            data-stage={s.stage}
-            data-state={s.state}
-            aria-current={s.state === "current" ? "step" : undefined}
-            className={cn("flex items-start gap-3 rounded-sm p-3", s.state === "current" && "bg-accent-tint")}
-          >
-            <span
-              role="img"
-              aria-label={`${s.label}, ${STATE_WORD[s.state]}`}
-              data-new={s.isNew ? "true" : undefined}
-              className={cn(
-                "flex size-9 shrink-0 items-center justify-center rounded-pill",
-                circle[s.state],
-                s.isNew && NEW_MOTION,
-              )}
-            >
-              <Icon name={STATUS_ICONS[s.stage]} size={iconSize(mode)} />
-            </span>
-            <div className="flex min-w-0 flex-col gap-1">
-              <p className={cn(text, "font-semibold", name[s.state])}>{s.label}</p>
-              {s.date ? <p className={cn(text, "text-ink-muted")}>{s.date}</p> : null}
-              {s.state === "current" && nextStep ? <p className={cn(text, "text-ink")}>{nextStep}</p> : null}
-            </div>
-          </li>
-        ))}
-      </ol>
-    </div>
-  );
-}
 
-function Compact({ mode, stages_, offPath, className }: Resolved<CompactTimelineProps>) {
-  const segment: Record<StageState, string> = {
-    done: "bg-ink",
-    current: "bg-accent-mark",
-    upcoming: "bg-surface-sunk",
-  };
-  const name: Record<StageState, string> = {
-    done: "text-ink",
-    current: "font-semibold text-accent-text",
-    upcoming: "text-ink-muted",
-  };
   return (
-    <div
-      {...rootProps("compact", mode, offPath)}
-      className={cn("vbt-timeline vbt-seg flex min-w-0 flex-col gap-2", className)}
-    >
-      <ol className="grid grid-cols-4 gap-1" aria-label="Stages">
-        {stages_.map((s) => (
-          <li
-            key={s.stage}
-            data-stage={s.stage}
-            data-state={s.state}
-            aria-current={s.state === "current" ? "step" : undefined}
-            className="flex min-w-0 flex-col gap-1"
-          >
-            <span
-              role="img"
-              aria-label={`${s.label}, ${STATE_WORD[s.state]}`}
-              data-new={s.isNew ? "true" : undefined}
-              className={cn("block h-2 rounded-pill", segment[s.state], s.isNew && NEW_MOTION)}
-            />
-            <span aria-hidden="true" className={cn(mode === "admin" ? "text-small" : "text-body-lg", name[s.state])}>
-              {s.label}
-            </span>
-          </li>
-        ))}
+    <div {...root} className={cn("vbt-timeline", hero && HORIZONTAL.root, className)}>
+      <ol aria-label="Stages" aria-busy={loading || undefined} className={cn("flex flex-col", hero && HORIZONTAL.ol)}>
+        {shown.map((node, i) => {
+          const at = AT.has(node.kind);
+          const next = shown[i + 1];
+          const filled = next !== undefined && next.kind !== "upcoming";
+          const icon = DOT_ICON[node.kind];
+          return (
+            <li
+              key={node.key}
+              data-stage={node.stage}
+              data-state={node.kind}
+              aria-current={at ? "step" : undefined}
+              className={cn("relative flex gap-3 pb-3 last:pb-0", hero && HORIZONTAL.li)}
+            >
+              {next ? (
+                // The 2px track from this dot's center to the next one's.
+                <span
+                  aria-hidden="true"
+                  data-slot="track"
+                  data-filled={filled ? "true" : "false"}
+                  className={cn(
+                    "absolute top-2 -bottom-3.5 left-2 w-0.5 -translate-x-1/2 overflow-hidden",
+                    tone.trackEmpty,
+                    hero && HORIZONTAL.track,
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "absolute inset-0 origin-top transition-transform duration-slow ease-out motion-reduce:transition-none",
+                      tone.trackFilled,
+                      hero && HORIZONTAL.fill,
+                      filled ? "scale-100" : cn("scale-y-0", hero && HORIZONTAL.fillEmpty),
+                    )}
+                  />
+                </span>
+              ) : null}
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "relative z-10 flex w-4 shrink-0 items-center justify-center",
+                  at ? "h-4" : mode === "voter" ? "h-7" : "h-6",
+                  hero && HORIZONTAL.dotBox,
+                )}
+              >
+                <span
+                  data-slot="dot"
+                  className={cn("flex size-4 items-center justify-center rounded-pill", tone.dot[node.kind])}
+                >
+                  {icon && !loading ? <Icon name={icon} size={12} /> : null}
+                </span>
+              </span>
+              <span className="sr-only">{node.spoken}</span>
+              <span aria-hidden="true" className={cn("flex min-w-0 flex-col", hero && HORIZONTAL.text)}>
+                {loading ? (
+                  <span data-slot="skeleton" className={cn("my-2 block h-4 w-32 max-w-full rounded-sm", tone.skeleton)} />
+                ) : (
+                  <>
+                    {at ? <span className={cn("text-label uppercase", tone.now)}>Now</span> : null}
+                    <span className={cn(text, tone.label[node.kind])}>{node.label}</span>
+                    {node.detail ? <span className={cn(smallText(mode), tone.detail)}>{node.detail}</span> : null}
+                  </>
+                )}
+              </span>
+            </li>
+          );
+        })}
       </ol>
-      {offPath ? (
-        <div>
-          <OffPathBadge offPath={offPath} mode={mode} />
-        </div>
-      ) : null}
+      <p role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </p>
     </div>
   );
 }

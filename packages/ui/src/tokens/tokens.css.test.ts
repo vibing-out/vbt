@@ -82,6 +82,14 @@ describe("tokens.css", () => {
     expect(blockBody("@theme inline")).toContain("--color-focus-inverse: var(--vbt-focus-inverse);");
   });
 
+  test('[data-theme="light"] restates every light color, for light islands like the QR tile', () => {
+    const light = blockBody('[data-theme="light"]');
+    expect(light).toContain("color-scheme: light;");
+    for (const c of tokens.color.tokens) expect(light).toContain(`--vbt-${c.name}: ${c.value.light};`);
+    // It comes before the dark block, so a nested data-theme="light" wins by being closer, not by order.
+    expect(css.indexOf('[data-theme="light"] {')).toBeLessThan(css.indexOf('[data-theme="dark"] {'));
+  });
+
   test("the status headline is the 32px display token", () => {
     expect(css).toContain("--text-display: 2rem;");
   });

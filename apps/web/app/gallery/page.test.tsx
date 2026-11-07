@@ -31,10 +31,13 @@ describe.each(MODES)("gallery %s section", (mode) => {
     }
   });
 
-  test("shows the timeline in its hero, history and compact forms, and both receipt forms", () => {
+  test("shows the timeline on the hero and a light card, every exception, and both receipt forms", () => {
     const el = section(mode);
-    for (const form of ["hero", "history", "compact"]) {
-      expect(el.querySelector(`[data-component="timeline"][data-form="${form}"]`), form).not.toBeNull();
+    for (const surface of ["hero", "raised"]) {
+      expect(el.querySelector(`[data-component="timeline"][data-surface="${surface}"]`), surface).not.toBeNull();
+    }
+    for (const status of ["CHALLENGED", "DISCARDED", "SPOILED"]) {
+      expect(el.querySelector(`[data-component="timeline"][data-off-path="${status}"]`), status).not.toBeNull();
     }
     for (const form of ["pass", "slip"]) {
       expect(el.querySelector(`[data-component="receipt"][data-form="${form}"]`), form).not.toBeNull();
@@ -57,10 +60,12 @@ describe("gallery copy rules", () => {
     for (const p of sentences) expect(p.className, p.textContent ?? "").toContain("text-body-lg");
   });
 
-  test("no time of day appears except the Updated time", () => {
+  test("no time of day appears anywhere: the hero card's Updated line is a date", () => {
     const { container } = render(<GalleryPage />);
-    const text = (container.textContent ?? "").replaceAll("Updated 9:42 PM", "");
+    const text = container.textContent ?? "";
     expect(text).not.toMatch(/\d{1,2}:\d{2}/);
+    expect(text).not.toMatch(/\b(?:AM|PM)\b/);
+    expect(text).toContain("Updated Nov 3");
   });
 });
 

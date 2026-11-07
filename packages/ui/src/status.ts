@@ -29,7 +29,7 @@ export type OffPathStatus = (typeof OFF_PATH_STATUSES)[number];
 export const REASON_STATUSES = ["CHALLENGED", "DISCARDED"] as const;
 export type ReasonStatus = (typeof REASON_STATUSES)[number];
 
-/** Voter mode: the locked public labels. DISCARDED's "(reason shown)" is the required reason detail. */
+/** The locked public labels, for sentences and headlines. DISCARDED's "(reason shown)" is the required reason detail. */
 export const VOTER_LABELS: Record<BallotStatus, string> = {
   CAST: "Cast and sealed",
   TALLIED_PRECINCT: "Counted at precinct",
@@ -40,26 +40,34 @@ export const VOTER_LABELS: Record<BallotStatus, string> = {
   SPOILED: "Spoiled by voter to check the machine; not counted",
 };
 
-/** Admin mode: compact labels for dense tables (StatusBadge README). */
-export const ADMIN_LABELS: Record<BallotStatus, string> = {
+/** StatusBadge labels, the same in voter and admin mode (StatusBadge README, Variants). */
+export const BADGE_LABELS: Record<BallotStatus, string> = {
   CAST: "Cast",
-  TALLIED_PRECINCT: "Counted",
-  REPORTED_UNOFFICIAL: "Election night",
+  TALLIED_PRECINCT: "Counted at precinct",
+  REPORTED_UNOFFICIAL: "Election-night results",
   CERTIFIED: "Certified",
-  CHALLENGED: "Challenged",
-  DISCARDED: "Discarded",
+  CHALLENGED: "Under review",
+  DISCARDED: "Not counted",
   SPOILED: "Spoiled",
 };
 
-/** Fixed icon meanings (design system README, Iconography). */
-export const STATUS_ICONS: Record<BallotStatus, IconName> = {
-  CAST: "lock",
-  TALLIED_PRECINCT: "check",
-  REPORTED_UNOFFICIAL: "chart",
-  CERTIFIED: "badge-check",
+/** StageTimeline stage labels (StageTimeline README, Stages). */
+export const STAGE_LABELS: Record<Stage, string> = {
+  CAST: "Cast and sealed",
+  TALLIED_PRECINCT: "Counted at precinct",
+  REPORTED_UNOFFICIAL: "Election-night results",
+  CERTIFIED: "Certified",
+};
+
+/**
+ * Status icons (StatusBadge README "Icon (admin)" column; design system README, Icons). Statuses
+ * without an icon show only their dot.
+ */
+export const STATUS_ICONS: Partial<Record<BallotStatus, IconName>> = {
+  CERTIFIED: "check",
   CHALLENGED: "flag",
-  DISCARDED: "x-circle",
-  SPOILED: "rotate-ccw",
+  DISCARDED: "x",
+  SPOILED: "undo-2",
 };
 
 export function isStage(status: BallotStatus): status is Stage {
@@ -68,8 +76,4 @@ export function isStage(status: BallotStatus): status is Stage {
 
 export function needsReason(status: BallotStatus): status is ReasonStatus {
   return (REASON_STATUSES as readonly string[]).includes(status);
-}
-
-export function statusLabel(status: BallotStatus, mode: "voter" | "admin"): string {
-  return mode === "admin" ? ADMIN_LABELS[status] : VOTER_LABELS[status];
 }

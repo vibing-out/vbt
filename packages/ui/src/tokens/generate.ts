@@ -75,6 +75,13 @@ export function generateTokensCss(tokens: TokenFile): string {
     `--vbt-font-mono: ${loaderFamilyStack(tokens.type.families.mono)};`,
   ]);
 
+  // A light island inside a dark page, e.g. the receipt pass QR tile, which must stay light to scan.
+  const light = block('[data-theme="light"]', [
+    "color-scheme: light;",
+    ...colors.map((c) => `--vbt-${c.name}: ${c.value.light};`),
+    ...shadows.map((s) => `--vbt-${s.name}: ${s.value.light};`),
+  ]);
+
   const dark = block('[data-theme="dark"]', [
     "color-scheme: dark;",
     ...colors.map((c) => `--vbt-${c.name}: ${c.value.dark};`),
@@ -93,5 +100,5 @@ export function generateTokensCss(tokens: TokenFile): string {
     ...tokens.type.groups.flatMap((group) => group.styles.flatMap(typeLines)),
   ]);
 
-  return `${HEADER}\n\n${root}\n\n${dark}\n\n${theme}\n`;
+  return `${HEADER}\n\n${root}\n\n${light}\n\n${dark}\n\n${theme}\n`;
 }

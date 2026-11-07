@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
-import { ADMIN_LABELS, BALLOT_STATUSES, OFF_PATH_STATUSES, STAGES, STATUS_ICONS, VOTER_LABELS } from "./status";
+import { BADGE_LABELS, BALLOT_STATUSES, OFF_PATH_STATUSES, STAGE_LABELS, STAGES, STATUS_ICONS, VOTER_LABELS } from "./status";
 
 // The locked "Ballot status state machine" table in docs/locked-interfaces.md.
 const locked = readFileSync(new URL("../../../docs/locked-interfaces.md", import.meta.url), "utf8");
@@ -24,24 +24,28 @@ describe("status presentation matches the locked state machine", () => {
     expect([...STAGES, ...OFF_PATH_STATUSES].sort()).toEqual([...BALLOT_STATUSES].sort());
   });
 
-  test("admin labels are compact and icons follow the fixed meanings", () => {
-    expect(ADMIN_LABELS).toEqual({
+  test("badge labels (voter and admin) are the StatusBadge README's, word for word", () => {
+    expect(BADGE_LABELS).toEqual({
       CAST: "Cast",
-      TALLIED_PRECINCT: "Counted",
-      REPORTED_UNOFFICIAL: "Election night",
+      TALLIED_PRECINCT: "Counted at precinct",
+      REPORTED_UNOFFICIAL: "Election-night results",
       CERTIFIED: "Certified",
-      CHALLENGED: "Challenged",
-      DISCARDED: "Discarded",
+      CHALLENGED: "Under review",
+      DISCARDED: "Not counted",
       SPOILED: "Spoiled",
     });
-    expect(STATUS_ICONS).toEqual({
-      CAST: "lock",
-      TALLIED_PRECINCT: "check",
-      REPORTED_UNOFFICIAL: "chart",
-      CERTIFIED: "badge-check",
-      CHALLENGED: "flag",
-      DISCARDED: "x-circle",
-      SPOILED: "rotate-ccw",
+  });
+
+  test("timeline stage labels are the StageTimeline README's", () => {
+    expect(STAGE_LABELS).toEqual({
+      CAST: "Cast and sealed",
+      TALLIED_PRECINCT: "Counted at precinct",
+      REPORTED_UNOFFICIAL: "Election-night results",
+      CERTIFIED: "Certified",
     });
+  });
+
+  test("status icons follow the fixed meanings (design system README, Icons)", () => {
+    expect(STATUS_ICONS).toEqual({ CERTIFIED: "check", CHALLENGED: "flag", DISCARDED: "x", SPOILED: "undo-2" });
   });
 });

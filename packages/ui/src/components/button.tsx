@@ -30,6 +30,8 @@ export const buttonVariants = cva(
         false: "",
       },
     },
+    // The voter primary action is at least 48px tall (design system README, Voter mode).
+    compoundVariants: [{ variant: "primary", mode: "voter", className: "min-h-12" }],
     defaultVariants: { variant: "primary", mode: "voter", inverse: false },
   },
 );

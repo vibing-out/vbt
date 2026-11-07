@@ -1,11 +1,13 @@
 import { Button } from "@vbt/ui/components/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@vbt/ui/components/card";
+import { CopyCode } from "@vbt/ui/components/copy-code";
 import { Input } from "@vbt/ui/components/input";
 import { Receipt } from "@vbt/ui/components/receipt";
-import { StageTimeline, type StageEntry } from "@vbt/ui/components/stage-timeline";
-import { PlainBadge, StatusBadge, type StatusBadgeProps } from "@vbt/ui/components/status-badge";
+import { StageTimeline, type StageEntry, type StageTimelineProps } from "@vbt/ui/components/stage-timeline";
+import { PlainBadge, StatusBadge } from "@vbt/ui/components/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@vbt/ui/components/table";
 import type { Mode } from "@vbt/ui/lib/mode";
+import { BALLOT_STATUSES, type BallotStatus } from "@vbt/ui/status";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { QrDemo } from "./qr-demo";
@@ -25,14 +27,16 @@ const SAMPLE = {
   code: "RIVER-MAPLE-7Q4K-HAWK",
   trackUrl: "vote.marion.in.gov/track",
   phone: "1-800-555-0100",
-  phoneCode: "7482-6619-0354-2817",
-  updatedAt: "9:42 PM",
+  phoneCode: "4821 9937 06",
+  /** A date, never a time of day: nothing beside a tracking code may reveal casting order. */
+  updated: "Nov 3",
 } as const;
 
 const TONIGHT: StageEntry[] = [
   { stage: "CAST", state: "done", date: "Nov 3" },
   { stage: "TALLIED_PRECINCT", state: "done", date: "Nov 3" },
   { stage: "REPORTED_UNOFFICIAL", state: "current", date: "Nov 3" },
+  { stage: "CERTIFIED", state: "upcoming", expected: "Nov 18" },
 ];
 
 const COUNTED: StageEntry[] = [
@@ -40,23 +44,26 @@ const COUNTED: StageEntry[] = [
   { stage: "TALLIED_PRECINCT", state: "current", date: "Nov 3" },
 ];
 
-const CERTIFIED: StageEntry[] = [
-  { stage: "CAST", state: "done", date: "Nov 3" },
-  { stage: "TALLIED_PRECINCT", state: "done", date: "Nov 3" },
-  { stage: "REPORTED_UNOFFICIAL", state: "done", date: "Nov 3" },
-  { stage: "CERTIFIED", state: "current", date: "Nov 17" },
-];
+const NEXT_STEP = "Certification is usually within two weeks.";
 
-const NEXT_STEP = "Counties certify up to about 2 weeks after Election Day.";
-
-const ALL_STATUSES: StatusBadgeProps[] = [
-  { status: "CAST", detail: "Nov 3" },
-  { status: "TALLIED_PRECINCT", detail: "Nov 3" },
-  { status: "REPORTED_UNOFFICIAL", state: "current" },
-  { status: "CERTIFIED" },
-  { status: "CHALLENGED", reason: "signature check" },
-  { status: "DISCARDED", reason: "arrived after the deadline" },
-  { status: "SPOILED" },
+/** The three exceptions and loading, on a light card (StageTimeline README, Exceptions and States). */
+const EXCEPTIONS: { title: string; props: StageTimelineProps }[] = [
+  {
+    title: "Under review",
+    props: { stages: COUNTED, offPath: { status: "CHALLENGED", reason: "The paper and machine records differ." } },
+  },
+  {
+    title: "Not counted",
+    props: { stages: COUNTED, offPath: { status: "DISCARDED", reason: "arrived after the deadline", date: "Nov 5" } },
+  },
+  {
+    title: "Spoiled",
+    props: {
+      stages: [],
+      offPath: { status: "SPOILED", replacement: { code: "OAK-FERN-2M8P-WREN", href: "#replacement" } },
+    },
+  },
+  { title: "Loading", props: { stages: [], loading: true } },
 ];
 
 function SampleQr() {
@@ -83,13 +90,12 @@ function Item({ title, children, mode }: { title: string; children: ReactNode; m
 function Badges({ mode }: { mode: Mode }) {
   return (
     <div className="flex flex-wrap items-start gap-2">
-      {ALL_STATUSES.map((props) => (
-        <StatusBadge key={props.status} {...props} mode={mode} />
+      {BALLOT_STATUSES.map((status) => (
+        <StatusBadge key={status} status={status} mode={mode} />
       ))}
       {mode === "admin" ? (
         <>
-          <StatusBadge status="CERTIFIED" state="pending" mode="admin" />
-          <PlainBadge mode="admin">Uploaded tonight</PlainBadge>
+          <PlainBadge mode="admin">Uploaded Nov 3</PlainBadge>
           <PlainBadge mode="admin">Signed in with MFA</PlainBadge>
         </>
       ) : null}
@@ -100,32 +106,27 @@ function Badges({ mode }: { mode: Mode }) {
 function Timelines({ mode }: { mode: Mode }) {
   return (
     <div className="flex flex-col gap-6">
-      <StageTimeline
-        form="hero"
-        mode={mode}
-        stages={TONIGHT}
-        justCompleted="TALLIED_PRECINCT"
-        headline="Your ballot is in tonight's results"
-        nextStep={NEXT_STEP}
-        code={SAMPLE.code}
-        county={SAMPLE.county}
-        precinct={SAMPLE.precinct}
-        updatedAt={SAMPLE.updatedAt}
-      />
-      <StageTimeline
-        form="hero"
-        mode={mode}
-        stages={COUNTED}
-        offPath={{ status: "DISCARDED", reason: "arrived after the deadline" }}
-        headline="Your ballot was not counted"
-        nextStep="The county election board decided this. Call the county to ask about it."
-        code={SAMPLE.code}
-        county={SAMPLE.county}
-        precinct={SAMPLE.precinct}
-        updatedAt={SAMPLE.updatedAt}
-      />
-      <StageTimeline form="history" mode={mode} stages={TONIGHT} nextStep={NEXT_STEP} />
-      <StageTimeline form="compact" mode={mode} stages={TONIGHT} />
+      {/* The tracker hero card: headline, then the timeline, then the code. */}
+      <Card variant="hero" mode={mode}>
+        <p className="text-label uppercase text-on-inverse-muted">
+          {SAMPLE.county} · {SAMPLE.precinct} · Updated {SAMPLE.updated}
+        </p>
+        <h4 className={mode === "admin" ? "text-heading" : "text-display"}>
+          Your ballot is in Marion County&apos;s election-night results
+        </h4>
+        <StageTimeline surface="hero" mode={mode} stages={TONIGHT} />
+        <p className={mode === "admin" ? "text-body" : "text-body-lg"}>{NEXT_STEP}</p>
+        <CopyCode code={SAMPLE.code} mode={mode} surface="inverse" />
+      </Card>
+      <Card mode={mode}>
+        <StageTimeline mode={mode} stages={TONIGHT} />
+      </Card>
+      {EXCEPTIONS.map(({ title, props }) => (
+        <Card key={title} mode={mode}>
+          <p className="text-label uppercase text-ink-muted">{title}</p>
+          <StageTimeline {...props} mode={mode} />
+        </Card>
+      ))}
     </div>
   );
 }
@@ -179,14 +180,10 @@ function VoterTable() {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {TONIGHT.map((s) => (
+        {TONIGHT.filter((s) => s.state !== "upcoming").map((s) => (
           <TableRow key={s.stage} selected={s.state === "current"}>
             <TableCell>
-              <StatusBadge
-                status={s.stage}
-                state={s.state === "current" ? "current" : "done"}
-                mode="voter"
-              />
+              <StatusBadge status={s.stage} mode="voter" />
             </TableCell>
             <TableCell>{s.date}</TableCell>
           </TableRow>
@@ -196,20 +193,14 @@ function VoterTable() {
   );
 }
 
-const PRECINCTS: {
-  name: string;
-  ballots: number;
-  stages: StageEntry[];
-  status: StatusBadgeProps;
-  selected?: boolean;
-}[] = [
-  { name: "Precinct 12", ballots: 1204, stages: TONIGHT, status: { status: "REPORTED_UNOFFICIAL", state: "current" }, selected: true },
-  { name: "Precinct 14", ballots: 988, stages: COUNTED, status: { status: "TALLIED_PRECINCT", state: "current" }, selected: true },
-  { name: "Precinct 15", ballots: 1530, stages: CERTIFIED, status: { status: "CERTIFIED", state: "pending" } },
-  { name: "Precinct 21", ballots: 3, stages: COUNTED, status: { status: "CHALLENGED", reason: "1 mismatch" } },
-  { name: "Precinct 22", ballots: 1, stages: COUNTED, status: { status: "DISCARDED", reason: "arrived after the deadline" } },
-  { name: "Precinct 30", ballots: 2, stages: [{ stage: "CAST", state: "done", date: "Nov 3" }], status: { status: "SPOILED" } },
-  { name: "Precinct 31", ballots: 742, stages: [{ stage: "CAST", state: "current", date: "Nov 3" }], status: { status: "CAST", state: "current" } },
+const PRECINCTS: { name: string; ballots: number; status: BallotStatus; updated: string; selected?: boolean }[] = [
+  { name: "Precinct 12", ballots: 1204, status: "REPORTED_UNOFFICIAL", updated: "Nov 3", selected: true },
+  { name: "Precinct 14", ballots: 988, status: "TALLIED_PRECINCT", updated: "Nov 3", selected: true },
+  { name: "Precinct 15", ballots: 1530, status: "CERTIFIED", updated: "Nov 17" },
+  { name: "Precinct 21", ballots: 3, status: "CHALLENGED", updated: "Nov 4" },
+  { name: "Precinct 22", ballots: 1, status: "DISCARDED", updated: "Nov 5" },
+  { name: "Precinct 30", ballots: 2, status: "SPOILED", updated: "Nov 3" },
+  { name: "Precinct 31", ballots: 742, status: "CAST", updated: "Nov 3" },
 ];
 
 function AdminTable() {
@@ -218,22 +209,20 @@ function AdminTable() {
       <TableHeader>
         <TableRow>
           <TableHead>Precinct</TableHead>
+          <TableHead>Stage</TableHead>
           <TableHead numeric>Ballots</TableHead>
-          <TableHead>Progress</TableHead>
-          <TableHead>Status</TableHead>
+          <TableHead numeric>Updated</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {PRECINCTS.map((p) => (
           <TableRow key={p.name} selected={p.selected}>
             <TableCell className="whitespace-nowrap">{p.name}</TableCell>
-            <TableCell numeric>{p.ballots.toLocaleString("en-US")}</TableCell>
-            <TableCell className="min-w-64">
-              <StageTimeline form="compact" mode="admin" stages={p.stages} />
-            </TableCell>
             <TableCell>
-              <StatusBadge {...p.status} mode="admin" />
+              <StatusBadge status={p.status} mode="admin" />
             </TableCell>
+            <TableCell numeric>{p.ballots.toLocaleString("en-US")}</TableCell>
+            <TableCell numeric>{p.updated}</TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -245,7 +234,7 @@ function Receipts({ mode }: { mode: Mode }) {
   const common = { ...SAMPLE, mode, qr: <SampleQr /> };
   return (
     <div className={mode === "admin" ? "grid gap-6 lg:grid-cols-2" : "flex flex-col gap-6"}>
-      <Receipt {...common} form="pass" />
+      <Receipt {...common} form="pass" status="REPORTED_UNOFFICIAL" trackHref={`/track/${SAMPLE.code}`} />
       <Receipt {...common} form="slip" phoneCode={SAMPLE.phoneCode} textNumber={SAMPLE.phone} />
     </div>
   );
@@ -327,7 +316,7 @@ function Section({ mode }: { mode: Mode }) {
 
       <Item title="QR scanner frame" mode={mode}>
         <div className={voter ? "" : "max-w-140"}>
-          <QrDemo mode={mode} code={SAMPLE.code} />
+          <QrDemo mode={mode} />
         </div>
       </Item>
     </section>

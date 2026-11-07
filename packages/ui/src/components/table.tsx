@@ -8,14 +8,14 @@ export type TableProps = ComponentProps<"table"> & {
   wrapperClassName?: string;
 };
 
-/** A table in its own card. Wide tables scroll inside the card; the page never scrolls sideways. */
+/** A table in its own radius-sm container. Wide tables scroll inside the card; the page never scrolls sideways. */
 export function Table({ className, wrapperClassName, mode = "admin", ...props }: TableProps) {
   return (
     <div
       data-component="table"
       data-mode={mode}
       className={cn(
-        "vbt-table-wrap relative w-full overflow-x-auto rounded-md bg-surface-raised shadow-card",
+        "vbt-table-wrap relative w-full overflow-x-auto rounded-sm bg-surface-raised shadow-card",
         wrapperClassName,
       )}
     >
@@ -42,12 +42,12 @@ export function TableBody(props: ComponentProps<"tbody">) {
 
 export type TableRowProps = ComponentProps<"tr"> & { selected?: boolean };
 
-/** Rows are separated by 1px line dividers; selected rows sit on accent-tint. */
+/** Rows are separated by 1px line dividers; hover and selected rows tint with surface-sunk (PrecinctTable README). */
 export function TableRow({ className, selected, ...props }: TableRowProps) {
   return (
     <tr
       data-selected={selected ? "true" : undefined}
-      className={cn("border-b border-line last:border-b-0 data-[selected=true]:bg-accent-tint", className)}
+      className={cn("border-b border-line last:border-b-0 transition-colors duration-fast ease-out hover:bg-surface-sunk data-[selected=true]:bg-surface-sunk motion-reduce:transition-none", className)}
       {...props}
     />
   );

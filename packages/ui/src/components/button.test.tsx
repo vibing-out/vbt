@@ -41,12 +41,26 @@ describe("Button", () => {
     );
     const voter = screen.getByRole("button", { name: "Voter" });
     const admin = screen.getByRole("button", { name: "Admin" });
-    expect(voter.className).toContain("min-h-11");
+    expect(voter.className).toContain("min-h-12");
     expect(voter.className).toContain("text-body-lg");
     expect(voter.dataset.mode).toBe("voter");
     expect(admin.className).not.toContain("min-h-11");
+    expect(admin.className).not.toContain("min-h-12");
     expect(admin.className).toContain("text-body");
     expect(admin.dataset.mode).toBe("admin");
+  });
+
+  test("the voter primary button is at least 48px tall; voter secondary stays at 44px", () => {
+    render(
+      <>
+        <Button>Check ballot</Button>
+        <Button variant="secondary">Scan</Button>
+      </>,
+    );
+    const primary = screen.getByRole("button", { name: "Check ballot" }).className.split(" ");
+    expect(primary).toContain("min-h-12");
+    expect(primary).not.toContain("min-h-11");
+    expect(screen.getByRole("button", { name: "Scan" }).className.split(" ")).toContain("min-h-11");
   });
 
   test("asChild renders the child element with button styles", () => {

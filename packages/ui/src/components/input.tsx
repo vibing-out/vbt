@@ -82,7 +82,7 @@ export function Input({
       ) : null}
       {error ? (
         <p id={errorId} className={cn(text, "flex items-start gap-2 text-status-discarded")}>
-          <Icon name="x-circle" size={iconSize(mode)} className="mt-1" />
+          <Icon name="x" size={iconSize(mode)} className="mt-1" />
           <span>{error}</span>
         </p>
       ) : null}

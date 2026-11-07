@@ -51,6 +51,36 @@
   --vbt-font-mono: var(--font-jetbrains-mono, "JetBrains Mono"), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+[data-theme="light"] {
+  color-scheme: light;
+  --vbt-surface: #F6F4EE;
+  --vbt-surface-raised: #FFFDF8;
+  --vbt-surface-sunk: #EDE9DF;
+  --vbt-ink: #14213D;
+  --vbt-ink-muted: #4A5568;
+  --vbt-line: #DDD8CC;
+  --vbt-line-strong: #8C8577;
+  --vbt-brand-orange: #E07A2E;
+  --vbt-accent-mark: #CC6A22;
+  --vbt-accent-text: #A84A14;
+  --vbt-on-accent: #14213D;
+  --vbt-focus: #2B59C3;
+  --vbt-focus-inverse: #8FB0FF;
+  --vbt-stage-done: #C9D3E3;
+  --vbt-accent-tint: #FBE9DA;
+  --vbt-surface-inverse: #14213D;
+  --vbt-on-inverse: #F6F4EE;
+  --vbt-on-inverse-muted: #AAB4C8;
+  --vbt-status-challenged: #8A5A00;
+  --vbt-status-challenged-bg: #FBEBC8;
+  --vbt-status-discarded: #9B2C1F;
+  --vbt-status-discarded-bg: #F7DCD6;
+  --vbt-status-spoiled: #5F6673;
+  --vbt-status-spoiled-bg: #E4E6EA;
+  --vbt-shadow-card: 0 1px 2px rgba(20,33,61,0.06), 0 8px 24px rgba(20,33,61,0.08);
+  --vbt-shadow-overlay: 0 12px 40px rgba(20,33,61,0.24);
+}
+
 [data-theme="dark"] {
   color-scheme: dark;
   --vbt-surface: #0F1626;

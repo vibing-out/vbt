@@ -34,13 +34,15 @@ describe("Table", () => {
     expect(th.getAttribute("scope")).toBe("col");
   });
 
-  test("rows are separated by line dividers; selected rows sit on accent-tint", () => {
+  test("rows are separated by line dividers; hover and selected rows tint with surface-sunk", () => {
     sample();
     const rows = screen.getAllByRole("row");
     for (const row of rows) expect(row.className).toContain("border-line");
     const selected = screen.getByTestId("selected");
     expect(selected.dataset.selected).toBe("true");
-    expect(selected.className).toContain("data-[selected=true]:bg-accent-tint");
+    expect(selected.className).toContain("data-[selected=true]:bg-surface-sunk");
+    expect(selected.className).toContain("hover:bg-surface-sunk");
+    expect(selected.className).not.toContain("accent-tint");
     expect(rows[1]?.hasAttribute("data-selected")).toBe(false);
   });
 
@@ -54,6 +56,7 @@ describe("Table", () => {
     const { container } = sample();
     const wrap = container.querySelector<HTMLElement>('[data-component="table"]')!;
     expect(wrap.className).toContain("overflow-x-auto");
+    expect(wrap.className.split(" ")).toEqual(expect.arrayContaining(["rounded-sm", "bg-surface-raised", "shadow-card"]));
     expect(container.querySelector("thead")?.className).toContain("sticky");
     expect(container.querySelector("thead")?.className).toContain("top-0");
   });

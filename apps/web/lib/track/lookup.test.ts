@@ -79,7 +79,7 @@ test("passes passed and failed through from an injected checker", async () => {
   expect(fail?.stages.every((s) => s.check.state === "failed")).toBe(true);
 });
 
-test("AC11: the stub checker yields unavailable, never passed", async () => {
+test("AC11: without a signing key or a published record the default checker yields unavailable, never passed", async () => {
   const result = await lookupBallot("SEED-0001", { env: ENV, fetch: fakeTrackerDb().fetch });
   expect(result?.stages.length).toBeGreaterThan(0);
   for (const stage of result!.stages) expect(stage.check).toEqual({ state: "unavailable", proof: null });

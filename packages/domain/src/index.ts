@@ -33,6 +33,19 @@ export {
 } from "./official.ts";
 
 export {
+  groupMismatchesByPrecinct,
+  MISMATCH_REASON,
+  type MismatchEventStep,
+  mismatchEventPlan,
+  type MismatchReport,
+  type MismatchReportBallot,
+  type MismatchReportPrecinct,
+  type MismatchReportScope,
+  mismatchReportScope,
+  type MismatchRow,
+} from "./mismatch.ts";
+
+export {
   type BallotChoices,
   type BallotStyle,
   type ChoiceErrorCode,

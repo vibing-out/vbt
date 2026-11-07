@@ -3,11 +3,11 @@ import { tokens } from "@vbt/ui";
 import { beforeEach, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  smoke: vi.fn(async () => true),
+  demoFlags: vi.fn(async () => ({ mismatchView: true, challengeDiscardFlow: true, stateLevelStatus: true })),
   greeting: vi.fn(async (): Promise<string | null> => "Hello, VBT"),
   count: vi.fn(async (): Promise<number | null> => 4),
 }));
-vi.mock("../../flags", () => ({ pipelineSmoke: mocks.smoke }));
+vi.mock("../../lib/demo-flags", () => ({ getDemoFlags: mocks.demoFlags }));
 vi.mock("../../lib/product-db", () => ({ readGreeting: mocks.greeting }));
 vi.mock("../../lib/context-log", () => ({ countContextEntries: mocks.count }));
 
@@ -27,10 +27,46 @@ test("uses design tokens from @vbt/ui", async () => {
   expect(html).toContain(`padding:${tokens.space.lg}`);
 });
 
-test("keeps the pipeline-smoke flag display", async () => {
-  expect(await render()).toContain('data-testid="flag-pipeline-smoke">pipeline-smoke flag: on</p>');
-  mocks.smoke.mockResolvedValueOnce(false);
-  expect(await render()).toContain("pipeline-smoke flag: off");
+const demoRegions = [
+  ["flag-mismatch-view", "Mismatch view", "mismatchView"],
+  ["flag-challenge-discard-flow", "Challenge and discard flow", "challengeDiscardFlow"],
+  ["flag-state-level-status", "State-level status", "stateLevelStatus"],
+] as const;
+const region = (testId: string, text: string) => `<p data-testid="${testId}">${text}</p>`;
+
+test("shows each demo flag as on when all are on", async () => {
+  const html = await render();
+  expect(html).toContain('data-testid="demo-features"');
+  for (const [testId, label] of demoRegions) expect(html).toContain(region(testId, `${label}: on`));
+  expect(mocks.demoFlags).toHaveBeenCalledOnce();
+});
+
+test.each(demoRegions)("shows %s as off when only that flag is off", async (testId, label, field) => {
+  mocks.demoFlags.mockResolvedValueOnce({
+    mismatchView: true,
+    challengeDiscardFlow: true,
+    stateLevelStatus: true,
+    [field]: false,
+  });
+  const html = await render();
+  expect(html).toContain(region(testId, `${label}: off`));
+  for (const [otherId, otherLabel] of demoRegions.filter(([id]) => id !== testId)) {
+    expect(html).toContain(region(otherId, `${otherLabel}: on`));
+  }
+});
+
+test("the pipeline-smoke flag is gone", async () => {
+  const html = await render();
+  expect(html).not.toContain("flag-pipeline-smoke");
+  expect(html).not.toContain("pipeline-smoke");
+});
+
+test("demo regions show no time or sequence", async () => {
+  const html = await render();
+  for (const [testId] of demoRegions) {
+    const text = html.match(new RegExp(`data-testid="${testId}">([^<]*)<`))?.[1];
+    expect(text, testId).toMatch(/^[A-Za-z -]+: (on|off)$/);
+  }
 });
 
 test("renders the context-log count, or a stable empty region", async () => {

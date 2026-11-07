@@ -18,9 +18,9 @@ function pages(dir: string): string[] {
 
 const PAGES = pages(OFFICIAL).map((file) => relative(OFFICIAL, file));
 
-test("the official pages are the T-09 set", () => {
+test("the official pages are the T-09 set plus demo control (T-22)", () => {
   expect(PAGES.sort()).toEqual(
-    ["challenges/page.tsx", "county/[id]/page.tsx", "mismatches/page.tsx", "page.tsx", "precinct/[id]/page.tsx", "upload/page.tsx"].map((p) => join(...p.split("/"))),
+    ["challenges/page.tsx", "county/[id]/page.tsx", "demo/page.tsx", "mismatches/page.tsx", "page.tsx", "precinct/[id]/page.tsx", "upload/page.tsx"].map((p) => join(...p.split("/"))),
   );
 });
 

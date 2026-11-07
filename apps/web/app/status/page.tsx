@@ -1,12 +1,19 @@
 import Link from "next/link";
 import { tokens } from "@vbt/ui";
-import { pipelineSmoke } from "../../flags";
 import { countContextEntries } from "../../lib/context-log";
+import { getDemoFlags, type DemoFlags } from "../../lib/demo-flags";
 import { readGreeting } from "../../lib/product-db";
 import { placeholderStatus } from "../../lib/status";
 
+// The demo-feature flags (flags.ts), each shown by its live value so a Flags Explorer toggle is visible.
+const demoFeatures: { key: string; label: string; flag: keyof DemoFlags }[] = [
+  { key: "mismatch-view", label: "Mismatch view", flag: "mismatchView" },
+  { key: "challenge-discard-flow", label: "Challenge and discard flow", flag: "challengeDiscardFlow" },
+  { key: "state-level-status", label: "State-level status", flag: "stateLevelStatus" },
+];
+
 export default async function Home() {
-  const [smoke, greeting, contextCount] = await Promise.all([pipelineSmoke(), readGreeting(), countContextEntries()]);
+  const [demoFlags, greeting, contextCount] = await Promise.all([getDemoFlags(), readGreeting(), countContextEntries()]);
   return (
     <main
       data-testid="home"
@@ -20,7 +27,14 @@ export default async function Home() {
       </p>
       <p data-testid="greeting">{greeting ?? "Greeting unavailable"}</p>
       <p>{placeholderStatus()}</p>
-      <p data-testid="flag-pipeline-smoke">pipeline-smoke flag: {smoke ? "on" : "off"}</p>
+      <section data-testid="demo-features" aria-label="Demo features" style={{ marginBlock: tokens.space.md }}>
+        <h2>Demo features</h2>
+        {demoFeatures.map(({ key, label, flag }) => (
+          <p key={key} data-testid={`flag-${key}`}>
+            {`${label}: ${demoFlags[flag] ? "on" : "off"}`}
+          </p>
+        ))}
+      </section>
       <section data-testid="context-log" aria-label="Context log" style={{ color: tokens.color.muted }}>
         {contextCount === null
           ? "Context log: unavailable"

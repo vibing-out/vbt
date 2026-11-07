@@ -10,6 +10,7 @@ import {
   isRateLimited,
   METRICS,
   NAME_TAGS,
+  notFoundPaths,
   pathFor,
   requestPaths,
   settings,
@@ -19,13 +20,17 @@ import { summarize } from "./summarize.ts";
 
 const run = settings(__ENV);
 const paths = requestPaths(run);
+const unknownPaths = notFoundPaths(run);
 export const options = buildOptions(__ENV);
 
 // 429 from the /api/track rate limiter is expected, so it doesn't count toward http_req_failed;
 // rate_limited (threshold < 5%) makes a heavily throttled run invalid instead.
 http.setResponseCallback(http.expectedStatuses({ min: 200, max: 399 }, 429));
+// An UNKNOWN_CODES lookup should get 404; it counts toward track_not_found, not http_req_failed.
+const notFoundExpected = http.expectedStatuses(404, 429);
 
 const rateLimited = new Rate(METRICS.rateLimited);
+const notFoundBy = { track: new Rate(METRICS.notFound("track")), record: new Rate(METRICS.notFound("record")) };
 const failedBy = { track: new Rate(METRICS.failed("track")), record: new Rate(METRICS.failed("record")) };
 const limitedBy = {
   track: new Rate(METRICS.rateLimitedBy("track")),
@@ -34,11 +39,16 @@ const limitedBy = {
 
 function lookup(endpoint: Endpoint) {
   const path = pathFor(paths, endpoint, exec.scenario.iterationInTest);
-  const res = http.get(`${run.baseUrl}${path}`, { tags: { endpoint, name: NAME_TAGS[endpoint] } });
+  const expectNotFound = unknownPaths.has(path);
+  const res = http.get(`${run.baseUrl}${path}`, {
+    tags: { endpoint, name: NAME_TAGS[endpoint] },
+    ...(expectNotFound ? { responseCallback: notFoundExpected } : {}),
+  });
   const limited = isRateLimited(res.status);
   rateLimited.add(limited);
   limitedBy[endpoint].add(limited);
-  failedBy[endpoint].add(!isExpectedStatus(res.status));
+  notFoundBy[endpoint].add(expectNotFound && res.status === 404);
+  failedBy[endpoint].add(!isExpectedStatus(res.status, expectNotFound));
 }
 
 export function track() {
@@ -56,6 +66,7 @@ export function handleSummary(data: Parameters<typeof summarize>[0]) {
     trackRate: run.trackRate,
     recordRate: run.recordRate,
     duration: run.duration,
+    target: run.targetDescription,
   });
   const json = `${JSON.stringify(results, null, 2)}\n`;
   return {

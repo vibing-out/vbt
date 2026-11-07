@@ -23,14 +23,19 @@ export const P95_BUDGET_MS = 500;
 export const MAX_ERROR_RATE = 0.01;
 export const MAX_RATE_LIMITED = 0.05;
 
-/** Written into the results file instead of the base URL, so no URL is ever committed. */
-export const TARGET_DESCRIPTION =
+/**
+ * Written into the results file instead of the base URL, so no URL is ever committed. The TARGET_DESCRIPTION
+ * variable overrides it when the run targets something else, such as a build that reads no database.
+ */
+export const DEFAULT_TARGET_DESCRIPTION =
   "Production build of apps/web (next build && next start) outside Vercel, against a local Supabase stack " +
   "(supabase start: migrations + supabase/seed.sql)";
 
 /** Custom metrics recorded by lookup.ts. Custom metrics always reach handleSummary, with or without thresholds. */
 export const METRICS = {
   rateLimited: "rate_limited",
+  /** Share of an endpoint's requests that got the 404 expected for an UNKNOWN_CODES code. */
+  notFound: (endpoint: Endpoint) => `${endpoint}_not_found`,
   failed: (endpoint: Endpoint) => `${endpoint}_failed`,
   rateLimitedBy: (endpoint: Endpoint) => `${endpoint}_rate_limited`,
   duration200: (endpoint: Endpoint) => `http_req_duration{endpoint:${endpoint},status:200}`,
@@ -51,22 +56,49 @@ export function baseUrl(env: Env): string {
   return raw;
 }
 
-function positiveInt(env: Env, name: string, fallback: number, unit: string): number {
+function wholeNumber(env: Env, name: string, fallback: number, unit: string, min: 0 | 1): number {
   const raw = env[name];
   if (raw === undefined || raw === "") return fallback;
-  if (!/^\d+$/.test(raw) || Number(raw) <= 0) throw new Error(`${name} must be a positive whole number of ${unit}`);
+  if (!/^\d+$/.test(raw) || Number(raw) < min) {
+    throw new Error(`${name} must be a ${min === 0 ? "non-negative" : "positive"} whole number of ${unit}`);
+  }
   return Number(raw);
+}
+
+const positiveInt = (env: Env, name: string, fallback: number, unit: string) => wholeNumber(env, name, fallback, unit, 1);
+
+/** Comma-separated list; undefined when unset or blank, an error when any entry is empty. */
+function list(env: Env, name: string): string[] | undefined {
+  const raw = env[name];
+  if (raw === undefined || raw.trim() === "") return undefined;
+  const entries = raw.split(",").map((entry) => entry.trim());
+  if (entries.some((entry) => entry === "")) throw new Error(`${name} must be a comma-separated list with no empty entries`);
+  return entries;
 }
 
 // Path template values for /api/record/{scope}/{stage}. Overridable so the script follows the scope and
 // stage shapes later tickets add to docs/locked-interfaces.md without a code change. Only emptiness is
 // checked; recordPath URL-encodes whatever is given.
 function recordScopes(env: Env): readonly string[] {
-  const raw = env.RECORD_SCOPES;
-  if (raw === undefined || raw.trim() === "") return DEFAULTS.recordScopes;
-  const scopes = raw.split(",").map((scope) => scope.trim());
-  if (scopes.some((scope) => scope === "")) throw new Error("RECORD_SCOPES must be a comma-separated list with no empty entries");
-  return scopes;
+  return list(env, "RECORD_SCOPES") ?? DEFAULTS.recordScopes;
+}
+
+// Tracking codes. TRACK_CODES are codes the target holds (expected 200); UNKNOWN_CODES are codes it must not
+// hold (expected 404). A code in both lists is a configuration error, since its expected status is ambiguous.
+function trackCodes(env: Env): { known: readonly string[]; unknown: readonly string[] } {
+  const known = list(env, "TRACK_CODES") ?? SEED_CODES;
+  const unknown = list(env, "UNKNOWN_CODES") ?? [];
+  const overlap = unknown.filter((code) => known.includes(code));
+  if (overlap.length > 0) throw new Error("UNKNOWN_CODES must not repeat a TRACK_CODES entry");
+  return { known, unknown };
+}
+
+function targetDescription(env: Env): string {
+  const raw = env.TARGET_DESCRIPTION?.trim();
+  if (raw === undefined || raw === "") return DEFAULT_TARGET_DESCRIPTION;
+  // The description is committed, so it must not smuggle in the URL the default exists to keep out.
+  if (/:\/\/|localhost|\d+\.\d+\.\d+\.\d+/i.test(raw)) throw new Error("TARGET_DESCRIPTION must describe the target, not give its URL or host");
+  return raw;
 }
 
 function recordStage(env: Env): string {
@@ -88,6 +120,9 @@ export interface Settings {
   duration: string;
   maxVUs: number;
   recordTargets: readonly RecordTarget[];
+  trackCodes: readonly string[];
+  unknownCodes: readonly string[];
+  targetDescription: string;
 }
 
 export interface RecordTarget {
@@ -97,13 +132,18 @@ export interface RecordTarget {
 
 export function settings(env: Env): Settings {
   const stage = recordStage(env);
+  const codes = trackCodes(env);
   return {
     baseUrl: baseUrl(env),
     trackRate: positiveInt(env, "TRACK_RATE", DEFAULTS.trackRate, "requests per second"),
-    recordRate: positiveInt(env, "RECORD_RATE", DEFAULTS.recordRate, "requests per second"),
+    // 0 turns the record scenario off, for targets that have no /api/record route.
+    recordRate: wholeNumber(env, "RECORD_RATE", DEFAULTS.recordRate, "requests per second", 0),
     duration: duration(env),
     maxVUs: positiveInt(env, "MAX_VUS", DEFAULTS.maxVUs, "VUs per scenario"),
     recordTargets: recordScopes(env).map((scope) => ({ scope, stage })),
+    trackCodes: codes.known,
+    unknownCodes: codes.unknown,
+    targetDescription: targetDescription(env),
   };
 }
 
@@ -120,17 +160,23 @@ function scenario(rate: number, s: Settings, exec: Endpoint) {
   };
 }
 
-/** k6 `options`: one constant-arrival-rate scenario per endpoint, and the pass criteria as thresholds. */
+/** Endpoints a run sends traffic to: track always, record unless RECORD_RATE is 0. */
+export function activeEndpoints(s: Pick<Settings, "recordRate">): readonly Endpoint[] {
+  return s.recordRate > 0 ? ENDPOINTS : ["track"];
+}
+
+/** k6 `options`: one constant-arrival-rate scenario per active endpoint, and the pass criteria as thresholds. */
 export function buildOptions(env: Env) {
   const s = settings(env);
+  const active = activeEndpoints(s);
+  const rates: Record<Endpoint, number> = { track: s.trackRate, record: s.recordRate };
   return {
-    scenarios: {
-      track: scenario(s.trackRate, s, "track"),
-      record: scenario(s.recordRate, s, "record"),
-    },
+    scenarios: Object.fromEntries(active.map((e) => [e, scenario(rates[e], s, e)])) as Partial<
+      Record<Endpoint, ReturnType<typeof scenario>>
+    >,
     thresholds: {
-      [METRICS.duration200("track")]: [`p(95)<${P95_BUDGET_MS}`],
-      [METRICS.duration200("record")]: [`p(95)<${P95_BUDGET_MS}`],
+      // A p95 threshold on an endpoint with no traffic would have no samples, so only active endpoints get one.
+      ...Object.fromEntries(active.map((e) => [METRICS.duration200(e), [`p(95)<${P95_BUDGET_MS}`]])),
       http_req_failed: [`rate<${MAX_ERROR_RATE}`],
       [METRICS.rateLimited]: [`rate<${MAX_RATE_LIMITED}`],
     },
@@ -154,12 +200,17 @@ export const NAME_TAGS: Readonly<Record<Endpoint, string>> = {
 
 export type RequestPaths = Readonly<Record<Endpoint, readonly string[]>>;
 
-/** Every path a run requests, per endpoint. */
-export function requestPaths(s: Pick<Settings, "recordTargets">): RequestPaths {
+/** Every path a run requests, per endpoint. Known and unknown codes interleave in the round-robin. */
+export function requestPaths(s: Pick<Settings, "recordTargets" | "trackCodes" | "unknownCodes">): RequestPaths {
   return {
-    track: SEED_CODES.map(trackPath),
+    track: [...s.trackCodes, ...s.unknownCodes].map(trackPath),
     record: s.recordTargets.map((t) => recordPath(t.scope, t.stage)),
   };
+}
+
+/** Paths whose expected answer is 404: the UNKNOWN_CODES lookups. */
+export function notFoundPaths(s: Pick<Settings, "unknownCodes">): ReadonlySet<string> {
+  return new Set(s.unknownCodes.map(trackPath));
 }
 
 /** Round-robin over the endpoint's paths, so every iteration picks a deterministic target. */
@@ -169,6 +220,10 @@ export function pathFor(paths: RequestPaths, endpoint: Endpoint, iteration: numb
   return list[index] as string;
 }
 
-/** Same rule as lookup.ts's setResponseCallback: 2xx/3xx, and 429 from the /api/track rate limiter, are expected. */
-export const isExpectedStatus = (status: number) => (status >= 200 && status <= 399) || status === 429;
+/**
+ * Same rule as lookup.ts's response callbacks: 2xx/3xx, and 429 from the /api/track rate limiter, are expected;
+ * for an unknown code, 404 (and 429) is expected and anything else, a 200 included, is a failure.
+ */
+export const isExpectedStatus = (status: number, expectNotFound = false) =>
+  expectNotFound ? status === 404 || status === 429 : (status >= 200 && status <= 399) || status === 429;
 export const isRateLimited = (status: number) => status === 429;

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  check, contextComment, landed, notify, readiness, slackMessage, slackText, ticketNumber, trimmed, unblock,
+  check, contextComment, landed, notify, readiness, slackMessage, slackText, ticketNumber, trimmed, unblock, webhookUrl,
   type Blocker, type GitHub, type Issue, type IssueRef, type LabelNotice, type Pull,
 } from './dispatch.ts'
 
@@ -385,5 +385,20 @@ describe('Slack notification', () => {
       await expect(landed(40, { github, context: failing, slackWebhook: webhook, fetch: post, log: (l) => lines.push(l) })).rejects.toThrow(/ingestion failed for #12: context-log block missing/)
       expect(lines).toEqual(['#12: Slack notification failed: Slack webhook returned 404: no_service'])
     })
+  })
+})
+
+describe('webhookUrl', () => {
+  const url = 'https://hooks.slack.com/services/T000/B000/abcDEF123'
+  it.each([
+    ['a bare URL', url],
+    ['surrounding whitespace and quotes', `  "${url}"\n`],
+    ['the whole curl example Slack shows', `curl -X POST -H 'Content-type: application/json' --data '{"text":"Hello"}' ${url}`],
+  ])('extracts the URL from %s', (_label, secret) => {
+    expect(webhookUrl(secret)).toBe(url)
+  })
+  it('returns null when no Slack webhook URL is present', () => {
+    expect(webhookUrl('not a url')).toBeNull()
+    expect(webhookUrl(undefined)).toBeNull()
   })
 })

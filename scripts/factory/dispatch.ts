@@ -293,12 +293,19 @@ export async function contextCheck(number: number, deps: Deps): Promise<void> {
   log(await context(['check'], pr.body))
 }
 
+// The webhook URL inside whatever was pasted into the secret: people paste quotes, whitespace, or the
+// whole `curl ...` example Slack shows. Returns null when no Slack webhook URL is present.
+export function webhookUrl(secret: string | undefined): string | null {
+  return /https:\/\/hooks\.slack\.com\/services\/[A-Za-z0-9/_-]+/.exec(secret ?? '')?.[0] ?? null
+}
+
 // Posts a labeled issue to the team Slack channel. Skips, without failing, when no webhook is set.
 // The webhook URL is a secret, so it never appears in a log line or an error message.
 export async function notify(number: number, deps: Deps): Promise<'skipped' | 'posted'> {
-  const { github, slackWebhook, fetch: post = fetch, log = console.log } = deps
+  const { github, fetch: post = fetch, log = console.log } = deps
+  const slackWebhook = webhookUrl(deps.slackWebhook)
   if (!slackWebhook) {
-    log('Slack webhook not configured; skipping')
+    log(deps.slackWebhook ? 'SLACK_WEBHOOK_URL holds no hooks.slack.com URL; skipping' : 'Slack webhook not configured; skipping')
     return 'skipped'
   }
   const text = slackMessage(await github.labelNotice(number, NEEDS_HUMAN))

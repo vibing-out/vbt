@@ -26,10 +26,51 @@ export function migrationFiles(): string[] {
     .sort();
 }
 
+/** Supabase's API roles, with the attributes Supabase gives them. */
+export const SUPABASE_API_ROLES: ReadonlyArray<{ name: string; options: string }> = [
+  { name: "anon", options: "nologin noinherit" },
+  { name: "authenticated", options: "nologin noinherit" },
+  { name: "service_role", options: "nologin noinherit bypassrls" },
+];
+
+/**
+ * Creates each role that does not exist yet. Roles are cluster-wide and parallel Vitest files bootstrap
+ * their scratch databases at the same moment, so another session may create a role between the check
+ * and the create: that duplicate_object (or pg_authid unique_violation) counts as success.
+ */
+export async function ensureRoles(
+  client: pg.Client,
+  roles: ReadonlyArray<{ name: string; options: string }>,
+): Promise<void> {
+  const specs = roles.map(({ name, options }) => {
+    if (!/^[a-z_][a-z0-9_]*$/.test(name)) throw new Error(`unsafe role name: ${name}`);
+    if (!/^[a-z ]*$/.test(options)) throw new Error(`unsafe role options: ${options}`);
+    return `array['${name}', '${options}']`;
+  });
+  if (specs.length === 0) return;
+  await client.query(`
+    do $$
+    declare
+      spec text[];
+    begin
+      foreach spec slice 1 in array array[${specs.join(", ")}] loop
+        continue when exists (select 1 from pg_roles where rolname = spec[1]);
+        begin
+          execute format('create role %I %s', spec[1], spec[2]);
+        exception
+          when duplicate_object or unique_violation then null;
+        end;
+      end loop;
+    end
+    $$;
+  `);
+}
+
 /**
  * Plain Postgres lacks Supabase's API roles. Create anon, authenticated and service_role when missing
  * and copy Supabase's default privileges (everything granted to all three), so the migrations' revokes
  * are tested against the same starting point as production. A real Supabase database is left alone.
+ * Safe to call from many connections at once (parallel Vitest files).
  */
 export async function bootstrapSupabaseRoles(client: pg.Client): Promise<void> {
   const { rows } = await client.query<{ supabase: boolean }>(
@@ -37,20 +78,8 @@ export async function bootstrapSupabaseRoles(client: pg.Client): Promise<void> {
   );
   if (rows[0]?.supabase) return;
 
+  await ensureRoles(client, SUPABASE_API_ROLES);
   await client.query(`
-    do $$
-    begin
-      if not exists (select 1 from pg_roles where rolname = 'anon') then
-        create role anon nologin noinherit;
-      end if;
-      if not exists (select 1 from pg_roles where rolname = 'authenticated') then
-        create role authenticated nologin noinherit;
-      end if;
-      if not exists (select 1 from pg_roles where rolname = 'service_role') then
-        create role service_role nologin noinherit bypassrls;
-      end if;
-    end
-    $$;
     grant usage on schema public to anon, authenticated, service_role;
     alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
     alter default privileges in schema public grant all on functions to anon, authenticated, service_role;

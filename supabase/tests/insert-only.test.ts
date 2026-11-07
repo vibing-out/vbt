@@ -101,6 +101,28 @@ describeDb("writes are server-only", () => {
     });
   }
 
+  test.each([
+    "update ballots set ciphertext = 'tampered'",
+    "update ballots set ciphertext_hash = 'tampered'",
+    "update ballots set tracking_code = 'TAMPERED'",
+    "update ballots set prev_tracking_code = 'TAMPERED'",
+    "update ballots set cast_date = current_date - 1",
+    "update ballots set current_status = 'CERTIFIED', ciphertext = 'tampered'",
+  ])("service_role cannot change a ballot's fixed columns: %s", async (sql) => {
+    await expect(asRole(db(), "service_role", sql)).rejects.toThrow(PERMISSION_DENIED);
+  });
+
+  test("service_role can update a ballot's current_status and mismatch", async () => {
+    const { rows } = await asRoleSteps(db(), "service_role", [
+      { sql: "update ballots set current_status = 'TALLIED_PRECINCT' where tracking_code = 'SEED-0001'" },
+      { sql: "update ballots set mismatch = true where tracking_code = 'SEED-0001'" },
+      {
+        sql: "select current_status, mismatch, ciphertext_hash is not null as hashed from ballots where tracking_code = 'SEED-0001'",
+      },
+    ]);
+    expect(rows).toEqual([{ current_status: "TALLIED_PRECINCT", mismatch: true, hashed: true }]);
+  });
+
   test("service_role inserts, updates and deletes on the mutable tables", async () => {
     const result = await asRoleSteps(db(), "service_role", [
       { sql: "insert into precincts (id, county_id, name) values ('18097-003', '18097', 'Center 3')" },

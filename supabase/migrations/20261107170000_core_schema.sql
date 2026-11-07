@@ -4,7 +4,8 @@
 --   * anon / authenticated read only safe columns: tracking codes, ciphertext hashes, statuses, dates,
 --     and published stage records. Ciphertext and event timestamps are withheld by column grants, so
 --     RLS is not the only guard. The views ballot_public and ballot_event_public are the public surface.
---   * service_role (server code) is the only writer.
+--   * service_role (server code) is the only writer. On ballots it may update only current_status and
+--     mismatch; everything else in a ballot row is fixed at insert.
 --   * ballot_events and stage_records are insert-only for everyone, the table owner included.
 --
 -- Status and scope values mirror @vbt/domain BALLOT_STATUSES and BATCH_SCOPES exactly
@@ -207,9 +208,11 @@ grant select (id, ballot_id, precinct_id, county_id, event_type, from_status, to
   on public.ballot_events to anon, authenticated;
 grant select on public.stage_records to anon, authenticated;
 
--- Server writes. Insert-only tables get no update or delete.
-grant select, insert, update, delete on public.precincts, public.machines, public.ballots, public.batches
-  to service_role;
+-- Server writes. Insert-only tables get no update or delete. A ballot's ciphertext, hash and tracking
+-- codes never change after insert: service_role may update only its status and mismatch flag.
+grant select, insert, update, delete on public.precincts, public.machines, public.batches to service_role;
+grant select, insert, delete on public.ballots to service_role;
+grant update (current_status, mismatch) on public.ballots to service_role;
 grant select, insert on public.ballot_events, public.stage_records to service_role;
 
 -- ---------------------------------------------------------------------------------------------------

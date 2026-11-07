@@ -1,7 +1,8 @@
 // Test-only: a fake PostgREST for the tracker's four public reads (ballot_public, ballot_event_public,
 // precincts, stage_records). It answers only the columns each view or table grants the public, so a
 // select of a private column (occurred_at, ciphertext, batch_id, ...) fails as it would for real, and
-// it applies the eq./in. filters the tracker uses. Every requested URL is recorded. Never imported by
+// it applies the eq./in. filters and limit/offset paging the tracker and record reader use (order is
+// accepted and ignored). Every requested URL is recorded. Never imported by
 // app code.
 
 export const SUPABASE_URL = "https://tracker.supabase.co";
@@ -140,15 +141,16 @@ export function fakeTrackerDb(data: TrackerDbData = seededData(), options: { fai
 
     let rows = data[table];
     for (const [param, value] of url.searchParams) {
-      if (param === "select" || param === "limit") continue;
+      if (param === "select" || param === "limit" || param === "offset" || param === "order") continue;
       if (value.startsWith("eq.")) rows = rows.filter((r) => String(r[param]) === value.slice(3));
       else if (value.startsWith("in.(") && value.endsWith(")")) {
         const allowed = parseInList(value.slice(3));
         rows = rows.filter((r) => allowed.includes(String(r[param])));
       } else return json({ message: `unsupported filter ${param}=${value}` }, 400);
     }
+    const offset = Number(url.searchParams.get("offset") ?? 0);
     const limit = url.searchParams.get("limit");
-    if (limit) rows = rows.slice(0, Number(limit));
+    rows = rows.slice(offset, limit ? offset + Number(limit) : undefined);
     return json(rows.map((r) => Object.fromEntries(chosen.map((c) => [c, r[c] ?? null]))));
   }) as typeof fetch;
 

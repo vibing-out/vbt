@@ -13,6 +13,7 @@ export default defineConfig({
         "src/crosscheck.ts",
         "src/cross-checks.ts",
         "src/timeline.ts",
+        "src/record-stage.ts",
         "src/stage-members.ts",
       ],
       reporter: ["text"],

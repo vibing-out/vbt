@@ -9,10 +9,18 @@ const serverModules = [
   "lib/require-role.ts",
   "lib/private-db.ts",
   "lib/mismatch-report.ts",
+  // T-09: the service-role database, the crypto adapter (election keys) and the official tools.
   "lib/service-db.ts",
+  "lib/official-db.ts",
+  "lib/crypto/index.ts",
+  "lib/batches.ts",
+  "lib/challenges.ts",
+  "lib/mismatches.ts",
+  "lib/uploads.ts",
+  "lib/page-guard.ts",
+  "lib/track/lookup.ts",
   "lib/election.ts",
   "lib/ingest.ts",
-  "lib/batches.ts",
 ];
 
 function sourceFiles(dir: string): string[] {
@@ -33,6 +41,10 @@ test("only the server-only context-log module reads CONTEXT_* names, and no clie
     const source = readFileSync(join(file), "utf8");
     const rel = relative(root, file);
     if (/CONTEXT_(SUPABASE_URL|SUPABASE_PUBLISHABLE_KEY|EMAIL|PASSWORD)/.test(source)) expect(rel).toBe("lib/context-log.ts");
-    if (/^\s*["']use client["']/m.test(source)) expect(source).not.toMatch(/product-db|context-log|require-role|private-db|mismatch-report/);
+    if (/^\s*["']use client["']/m.test(source)) {
+      expect(source).not.toMatch(/product-db|context-log|require-role|private-db|mismatch-report|track\/lookup|track\/handler/);
+      // T-09 server modules, by import path (a client form may still name its /api/batches URL).
+      expect(source).not.toMatch(/from\s+["'][^"']*lib\/(service-db|crypto|batches|challenges|mismatches|uploads|page-guard)\b/);
+    }
   }
 });

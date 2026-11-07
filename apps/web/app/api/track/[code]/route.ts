@@ -1,9 +1,15 @@
-import { NextResponse } from "next/server";
-import { lookup } from "../../../../lib/demo-election";
+// GET /api/track/{code}: the public tracker (locked-interfaces § API boundaries). No auth; rate-limited.
+// Returns status, a dated timeline, the ciphertext hash and a check per published stage.
+import { handleTrackRequest } from "../../../../lib/track/handler";
+import { lookupWithDemoFallback } from "../../../../lib/track/demo-fallback";
+import { firewallRateLimiter } from "../../../../lib/track/rate-limit";
 
-export async function GET(_req: Request, { params }: { params: Promise<{ code: string }> }): Promise<NextResponse> {
-  const { code } = await params;
-  const view = lookup(decodeURIComponent(code));
-  if (!view) return NextResponse.json({ error: "No ballot matches that tracking code." }, { status: 404 });
-  return NextResponse.json(view, { headers: { "Cache-Control": "no-store" } });
+export const dynamic = "force-dynamic";
+
+export async function GET(request: Request, context: { params: Promise<{ code: string }> }): Promise<Response> {
+  const { code } = await context.params;
+  return handleTrackRequest(request, code, {
+    isRateLimited: firewallRateLimiter,
+    lookup: (normalised) => lookupWithDemoFallback(normalised),
+  });
 }

@@ -70,9 +70,11 @@ export function TrackerView({ code, state }: { code: string; state: TrackerState
       )}
 
       {state.kind === "not_found" && (
-        <p role="alert" data-testid="not-found">
-          {NOT_FOUND_MESSAGE}
-        </p>
+        <div role="alert" data-testid="track-unknown">
+          <h1 style={{ fontSize: "1.5rem" }}>We couldn&apos;t find that code</h1>
+          <p data-testid="not-found">{NOT_FOUND_MESSAGE}</p>
+          <p style={muted}>Lost receipts can&apos;t be recovered, by design.</p>
+        </div>
       )}
 
       {state.kind === "ready" && <BallotJourney data={state.data} stale={state.stale} />}

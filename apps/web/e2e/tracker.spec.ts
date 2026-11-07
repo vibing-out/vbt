@@ -1,7 +1,9 @@
 import { devices, expect, type Page, test } from "@playwright/test";
 
-// T-08 public ballot tracker, on a phone-sized screen. Most specs mock GET /api/track/* with page.route,
-// so they don't depend on a seeded database; "unknown code" runs against the real route.
+// The public ballot tracker, on a phone-sized screen. Demo-election codes (lib/demo-election.ts) render
+// server-side; any other code uses the live T-08 tracker. Most live-tracker specs mock GET /api/track/*
+// with page.route, so they don't depend on a seeded database; the unknown-code specs run against the
+// real route.
 const { viewport, userAgent, deviceScaleFactor, isMobile, hasTouch } = devices["Pixel 7"];
 test.use({ viewport, userAgent, deviceScaleFactor, isMobile, hasTouch });
 
@@ -124,7 +126,7 @@ test("manual entry and /track?code= open the tracking page @smoke", async ({ pag
   await mockApi(page, body(["CAST"]));
   await page.goto("/track");
   await page.getByLabel("Tracking code").fill("seed 0001");
-  await page.getByRole("button", { name: "Track ballot" }).click();
+  await page.getByRole("button", { name: "Track my ballot" }).click();
   await expect(page).toHaveURL(/\/track\/SEED-0001$/);
   await expect(page.getByTestId("current-status")).toHaveText("Cast and sealed");
 
@@ -137,8 +139,30 @@ test("no sign-up, email or phone fields @smoke", async ({ page }) => {
   for (const path of ["/track", "/track/SEED-0001"]) {
     await page.goto(path);
     await expect(page.locator('input[type="email"], input[type="tel"], input[type="password"]')).toHaveCount(0);
-    expect(await page.locator("body").innerText()).not.toMatch(/e-?mail|phone|sign[ -]?up|create an account/i);
+    expect(await page.locator("body").innerText()).not.toMatch(/sign[ -]?up|create an account/i);
   }
+  // The entry page says "No account, email or phone number." on purpose, so the wording check for
+  // email and phone runs on the tracking page only.
+  expect(await page.locator("body").innerText()).not.toMatch(/e-?mail|phone/i);
   await page.goto("/track");
   await expect(page.locator("input, textarea, select")).toHaveCount(1);
+});
+
+// Demo election (main): the home page redirect and the server-rendered demo tracker.
+test("the home page opens the tracker, and a demo code shows its stages @smoke", async ({ page }) => {
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/track$/);
+  await expect(page.getByRole("heading", { name: "Track your ballot" })).toBeVisible();
+
+  await page.getByLabel("Tracking code").fill("bachelor random ertx category");
+  await page.getByRole("button", { name: "Track my ballot" }).click();
+  await expect(page).toHaveURL(/\/track\/BACHELOR-RANDOM-ERTX-CATEGORY$/);
+  await expect(page.getByTestId("status")).toHaveText("Included in certified results");
+  await expect(page.getByTestId("integrity")).toContainText("unchanged and included in every published record");
+  await expect(page.locator("body")).not.toContainText(/\d{1,2}:\d{2}/);
+});
+
+test("an unknown code shows a generic message @smoke", async ({ page }) => {
+  await page.goto("/track/NOT-A-REAL-CODE");
+  await expect(page.getByTestId("track-unknown")).toContainText("We couldn't find that code");
 });

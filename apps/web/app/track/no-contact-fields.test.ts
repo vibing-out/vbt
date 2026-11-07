@@ -16,11 +16,19 @@ function sources(dir: string): string[] {
   });
 }
 
+// Exact strings that name these words without collecting anything: the entry page saying none are
+// needed, and the printed receipt's county helpline and QR instructions (voter-journey receipt mockup).
+const ALLOWED = [
+  "No account, email or phone number.",
+  'phone="1-800-555-0100"',
+  "Scan its QR code with a phone to open",
+];
+
 test("the tracker source has no sign-up, email or phone wording or fields", () => {
   const files = TRACKER_DIRS.flatMap((d) => sources(join(web, d)));
   expect(files.length).toBeGreaterThan(5);
   for (const file of files) {
-    const source = readFileSync(file, "utf8");
+    const source = ALLOWED.reduce((text, allowed) => text.replaceAll(allowed, ""), readFileSync(file, "utf8"));
     expect(source, relative(web, file)).not.toMatch(/e-?mail|phone|\btel\b|sign[ -]?up|register|password|account/i);
   }
 });

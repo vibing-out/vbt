@@ -2,9 +2,14 @@ import { Button } from "@vbt/ui/components/button";
 import { Card, CardDescription, CardTitle } from "@vbt/ui/components/card";
 import { CodeText } from "@vbt/ui/components/code-text";
 import { Input } from "@vbt/ui/components/input";
+import { TRACKING_CODE_PATTERN } from "@vbt/crypto";
+import { headers } from "next/headers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { normalizeCode, sampleCodes } from "../../lib/demo-election";
+import { receiptOrigin } from "../../lib/receipt-qr";
+import { RECEIPT_HOSTS } from "../../lib/receipt-url";
+import { ReceiptScanner } from "./receipt-scanner";
 import { TrackerShell } from "./shell";
 
 export const metadata = { title: "Track your ballot · VBT" };
@@ -16,6 +21,9 @@ export default async function TrackPage({
 }): Promise<React.JSX.Element> {
   const { code } = await searchParams;
   if (code && code.trim()) redirect(`/track/${encodeURIComponent(normalizeCode(code))}`);
+  // Receipts printed from this host (a preview or local build) scan here too, besides the public domain.
+  const { host } = receiptOrigin(await headers());
+  const scanHosts = [...new Set([...RECEIPT_HOSTS, host])];
   return (
     <TrackerShell>
       <Card variant="hero" data-testid="track-entry">
@@ -43,6 +51,7 @@ export default async function TrackPage({
             Track my ballot
           </Button>
         </form>
+        <ReceiptScanner hosts={scanHosts} codePattern={TRACKING_CODE_PATTERN.source} manualInputId="code" />
       </Card>
       <Card aria-label="Demo codes">
         <CardTitle>Try a demo ballot</CardTitle>

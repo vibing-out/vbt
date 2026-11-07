@@ -1,0 +1,29 @@
+{
+  "name": "@vbt/demo",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "24.x" },
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts",
+    "./cli": "./src/cli.ts"
+  },
+  "bin": {
+    "demo": "./bin/demo.ts"
+  },
+  "scripts": {
+    "demo": "node bin/demo.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.119.0",
+    "@vbt/domain": "workspace:*",
+    "otpauth": "9.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3",
+    "vitest": "5.1.0"
+  }
+}

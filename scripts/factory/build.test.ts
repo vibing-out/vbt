@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
-  branchName, build, decisions, hasSlot, parseClaude, prBody, reviewVerdict, STAGES, verdict, withContract, withoutVerdict,
+  branchName, build, decisions, MAX_REVIEW_ROUNDS, hasSlot, parseClaude, prBody, reviewVerdict, STAGES, verdict, withContract, withoutVerdict,
   type BuildDeps, type Exec, type Stage,
 } from './build.ts'
 import { check as checkReport } from './report.ts'
@@ -233,6 +233,19 @@ describe('build', () => {
     })
     expect(await build(32, w.deps)).toBe('merged')
     expect(w.calls.filter((c) => c.includes('--continue')).length).toBe(1)
+  })
+
+  it('stops for a person after two review rounds that still need fixes', async () => {
+    const w = world({
+      triage: ['VERDICT: clean'], spec: ['VERDICT: clean'],
+      implement: ['a\nVERDICT: clean', 'b\nVERDICT: clean', 'c\nVERDICT: clean'],
+      review: [`${OPEN_FIX}\nVERDICT: fixes`, `${OPEN_FIX}\nVERDICT: fixes`, `${EXAMPLE}\nVERDICT: clean`],
+    })
+    expect(MAX_REVIEW_ROUNDS).toBe(2)
+    expect(await build(32, w.deps)).toBe('needs-human')
+    expect(w.calls.filter((c) => c.startsWith('claude') && c.includes('Read,Grep,Glob,WebSearch') && !c.includes('--continue')).length).toBe(4) // triage, spec, 2 reviews
+    expect(w.calls.some((c) => c.startsWith('gh pr merge'))).toBe(false)
+    expect(w.labels).toEqual(['needs-human', 'needs-human'])
   })
 
   it('stops for a person when checks still fail after two implement attempts', async () => {

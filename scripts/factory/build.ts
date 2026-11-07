@@ -24,7 +24,7 @@ import { check as checkReport, render as renderReport } from './report.ts'
 export const STAGES = ['triage', 'spec', 'implement', 'review'] as const
 export type Stage = (typeof STAGES)[number]
 export type Verdict = 'clean' | 'fixes' | 'needs-human'
-export const MAX_REVIEW_ROUNDS = 4
+export const MAX_REVIEW_ROUNDS = 2
 export const MAX_PARALLEL_TICKETS = 2
 const NEEDS_HUMAN = 'needs-human'
 const WORKTREE = '/tmp/ticket'

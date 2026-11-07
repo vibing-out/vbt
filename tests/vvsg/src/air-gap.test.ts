@@ -14,11 +14,14 @@ const SCANNED_ROOTS = ["apps/web", "packages/*/src", "tools/*/src", "supabase/li
 
 /** Every scanned file with an outbound call, and why. A new call site, or a stale entry, fails. */
 const OUTBOUND_ALLOWLIST: Record<string, string> = {
+  "apps/web/app/official/demo/demo-control.tsx": "same-origin: calls this app's own /api routes",
   "apps/web/lib/product-db.ts": "our own Supabase: reads app_info through the Data API",
   "apps/web/lib/context-log.ts": "our own Supabase: the team's context-log project",
   "apps/web/lib/require-role.ts": "our own Supabase: Auth session, role and MFA check",
   "apps/web/lib/service-db.ts": "our own Supabase: service-role RPCs for ingest and batches (T-05)",
   "supabase/scripts/seed-demo-officials.ts": "our own Supabase: creates the demo officials (run by a human)",
+  "tools/demo/src/cli.ts": "same-origin: calls this app's own /api routes",
+  "tools/demo/src/http-ports.ts": "same-origin: calls this app's own /api routes",
   "tools/verifier/src/cli.ts": "public verifier: read-only download of the published record from the --base-url a citizen gives",
 };
 

@@ -3,7 +3,7 @@
 export { ready } from "./ready.js";
 export { generateElectionKeyPair, generateSigningKeyPair } from "./keys.js";
 export { encryptBallot } from "./sealedBallot.js";
-export { computeTrackingCode } from "./trackingCode.js";
+export { computeTrackingCode, isTrackingCode, TRACKING_CODE_PATTERN } from "./trackingCode.js";
 export { TRACKING_WORDLIST } from "./wordlist.js";
 export { buildMerkleTree, verifyInclusionProof } from "./merkle.js";
 export { signStageRecord, verifyStageRecord } from "./stageRecord.js";

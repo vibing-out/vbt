@@ -12,10 +12,6 @@ export function utf8(text: string): Uint8Array {
   return new TextEncoder().encode(text);
 }
 
-export function toHex(bytes: Uint8Array): string {
-  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("hex");
-}
-
 export function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;

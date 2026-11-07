@@ -7,6 +7,14 @@ export const CROCKFORD_BASE32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 /** Frozen format: WORD-WORD-XXXX-WORD, e.g. RIVER-MAPLE-7Q4K-HAWK. */
 export const TRACKING_CODE_PATTERN = /^[A-Z]{3,8}-[A-Z]{3,8}-[0-9A-HJKMNP-TV-Z]{4}-[A-Z]{3,8}$/;
 
+/**
+ * True when `code` has the frozen tracking-code shape. Checks format only,
+ * not that the words are in TRACKING_WORDLIST or that the code exists.
+ */
+export function isTrackingCode(code: unknown): code is string {
+  return typeof code === "string" && TRACKING_CODE_PATTERN.test(code);
+}
+
 /** Reads bits big-endian (most significant bit of byte 0 first). */
 function bitReader(bytes: Uint8Array) {
   let bitPos = 0;

@@ -67,6 +67,7 @@ describe("aggregateDecrypt (AC5)", () => {
   it("the public index exports exactly the locked API, with no individual decrypt", () => {
     expect(Object.keys(publicApi).sort()).toEqual(
       [
+        "TRACKING_CODE_PATTERN",
         "TRACKING_WORDLIST",
         "aggregateDecrypt",
         "buildMerkleTree",
@@ -74,6 +75,7 @@ describe("aggregateDecrypt (AC5)", () => {
         "encryptBallot",
         "generateElectionKeyPair",
         "generateSigningKeyPair",
+        "isTrackingCode",
         "ready",
         "signStageRecord",
         "verifyInclusionProof",

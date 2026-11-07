@@ -1,8 +1,15 @@
 // AC2: chained tracking codes are deterministic; format frozen as WORD-WORD-XXXX-WORD.
 import { createHash } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
-import { computeTrackingCode, encryptBallot, generateElectionKeyPair, TRACKING_WORDLIST } from "./index.js";
-import { CROCKFORD_BASE32, TRACKING_CODE_PATTERN } from "./trackingCode.js";
+import {
+  computeTrackingCode,
+  encryptBallot,
+  generateElectionKeyPair,
+  isTrackingCode,
+  TRACKING_CODE_PATTERN,
+  TRACKING_WORDLIST,
+} from "./index.js";
+import { CROCKFORD_BASE32 } from "./trackingCode.js";
 import { ballotA, flipByte } from "./fixtures.test-helpers.js";
 
 /** Independent reference: treat the SHA-256 digest as one 256-bit big-endian integer. */
@@ -83,5 +90,28 @@ describe("computeTrackingCode (AC2)", () => {
   it("rejects non-byte input", () => {
     expect(() => computeTrackingCode("abc" as never, null)).toThrow(TypeError);
     expect(() => computeTrackingCode(fixed, 5 as never)).toThrow(TypeError);
+  });
+
+  it("isTrackingCode accepts generated codes and rejects malformed ones", () => {
+    let prev: string | null = null;
+    for (const ct of ciphertexts) {
+      const code = computeTrackingCode(ct, prev);
+      expect(isTrackingCode(code)).toBe(true);
+      prev = code;
+    }
+    expect(isTrackingCode("RIVER-MAPLE-7Q4K-HAWK")).toBe(true);
+    for (const bad of [
+      "",
+      "river-maple-7q4k-hawk",
+      "RIVER-MAPLE-7Q4L-HAWK",
+      "RIVER-MAPLE-7Q4-HAWK",
+      "RIVER-MAPLE-HAWK-7Q4K",
+      "RIVER-MAPLE-7Q4K-HAWK\n",
+      " RIVER-MAPLE-7Q4K-HAWK",
+    ]) {
+      expect(isTrackingCode(bad)).toBe(false);
+    }
+    expect(isTrackingCode(null)).toBe(false);
+    expect(isTrackingCode(42)).toBe(false);
   });
 });

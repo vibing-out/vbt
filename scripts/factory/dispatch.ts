@@ -4,14 +4,18 @@
 //   node scripts/factory/dispatch.ts landed <pr>           on a merge into epic/*: log, close, unblock; into main: log
 //   node scripts/factory/dispatch.ts unblock <issue>       on an issue closing: re-check what it blocked
 //   node scripts/factory/dispatch.ts context-check <pr>    on epic/* and main pull requests: validate the body
-// Reads GITHUB_TOKEN and GITHUB_REPOSITORY (owner/name) from the environment. `check` and `landed`
-// call scripts/context.ts, which reads its own sign-in variables (see that file).
+//   node scripts/factory/dispatch.ts notify <issue>        on `needs-human`: post the issue to the team Slack channel
+// Reads GITHUB_TOKEN and GITHUB_REPOSITORY (owner/name) from the environment, and SLACK_WEBHOOK_URL for
+// `notify` and `landed` (unset or empty means no Slack post). `check` and `landed` call scripts/context.ts,
+// which reads its own sign-in variables (see that file).
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
-const USAGE = 'usage: node dispatch.ts <check <issue> | landed <pr> | unblock <issue> | context-check <pr>>'
+const USAGE = 'usage: node dispatch.ts <check <issue> | landed <pr> | unblock <issue> | context-check <pr> | notify <issue>>'
 const CONTEXT_TS = fileURLToPath(new URL('../context.ts', import.meta.url))
 const COMMENT_LIMIT = 60_000 // GitHub rejects comments over 65,536 characters
+const NEEDS_HUMAN = 'needs-human'
+const SLACK_QUOTE_LIMIT = 1_500 // characters of the newest comment quoted in Slack
 
 // Shapes -----------------------------------------------------------------------------------------
 
@@ -26,6 +30,15 @@ export type Issue = IssueRef & {
   blocking: IssueRef[]
 }
 export type Pull = { number: number; url: string; merged: boolean; base: string; body: string; mergeCommit: string | null }
+// What the Slack post needs about an issue that was labeled: who added the label (null when GitHub
+// has no actor, such as a deleted account) and the newest comment, which usually holds the questions.
+export type LabelNotice = {
+  number: number
+  title: string
+  url: string
+  labeledBy: string | null
+  comment: { author: string | null; body: string; url: string } | null
+}
 
 export interface GitHub {
   issue(number: number): Promise<Issue>
@@ -34,11 +47,20 @@ export interface GitHub {
   addLabels(number: number, labels: string[]): Promise<void>
   removeLabel(number: number, label: string): Promise<void>
   close(number: number): Promise<void>
+  labelNotice(number: number, label: string): Promise<LabelNotice>
 }
 
 // Runs scripts/context.ts with these arguments and this standard input; resolves to its stdout.
 export type ContextLog = (args: string[], input?: string) => Promise<string>
-export type Deps = { github: GitHub; context: ContextLog; now?: () => Date; log?: (line: string) => void }
+export type Deps = {
+  github: GitHub
+  context: ContextLog
+  now?: () => Date
+  log?: (line: string) => void
+  // The Slack incoming webhook; unset or empty means `notify` skips. `fetch` is replaceable for tests.
+  slackWebhook?: string | undefined
+  fetch?: typeof fetch
+}
 
 // Pure rules -------------------------------------------------------------------------------------
 
@@ -122,6 +144,38 @@ export function contextComment(sections: { topic: string; relation: string; outp
   return body
 }
 
+// Ticket text made safe for Slack mrkdwn: `<!...>` commands (`<!channel>`, `<!subteam^...>`) and
+// `@channel`, `@here` and `@everyone` are removed, repeatedly so pieces can't rejoin into a new one,
+// then `&`, `<` and `>` are escaped as Slack requires, so nothing left can form a link or mention.
+export function slackText(raw: string): string {
+  let text = raw
+  for (let previous = ''; previous !== text; ) {
+    previous = text
+    text = text.replace(/<![^>]*>/g, '').replace(/@(?:channel|here|everyone)\b/gi, '')
+  }
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+// The first `limit` characters (by code point, so an emoji isn't cut in half), marked when cut.
+export function trimmed(text: string, limit = SLACK_QUOTE_LIMIT): string {
+  const chars = [...text.trim()]
+  return chars.length <= limit ? chars.join('') : `${chars.slice(0, limit).join('').trimEnd()}…`
+}
+
+// A bold title link, who added the label, then the newest comment as a quote block.
+export function slackMessage(notice: LabelNotice, label = NEEDS_HUMAN): string {
+  const lines = [
+    `*<${notice.url}|#${notice.number} ${slackText(notice.title)}>*`,
+    `\`${label}\` added by ${notice.labeledBy ? slackText(notice.labeledBy) : 'an unknown actor'}`,
+  ]
+  if (!notice.comment) return [...lines, '_No comments on the issue yet._'].join('\n')
+  const author = notice.comment.author ? slackText(notice.comment.author) : 'an unknown author'
+  const quote = slackText(trimmed(notice.comment.body) || '(empty comment)')
+    .split('\n')
+    .map((line) => `> ${line}`)
+  return [...lines, `<${notice.comment.url}|Newest comment> by ${author}:`, ...quote].join('\n')
+}
+
 // Commands ---------------------------------------------------------------------------------------
 
 export async function check(number: number, deps: Deps): Promise<'skipped' | 'ready' | 'blocked'> {
@@ -169,6 +223,13 @@ export async function landed(number: number, deps: Deps): Promise<void> {
     const message = err instanceof Error ? err.message : String(err)
     await github.addLabels(ticket, ['needs-human'])
     await github.comment(ticket, `Context ingestion failed for pull request #${number}, so dependent tickets were not dispatched.\n\n${fenced(message)}`)
+    // In-process, because a label added with GITHUB_TOKEN does not start the `notify` workflow job.
+    // A failed Slack post is logged rather than thrown, so it can't hide the ingestion error.
+    try {
+      await notify(ticket, deps)
+    } catch (notifyErr) {
+      log(`#${ticket}: Slack notification failed: ${notifyErr instanceof Error ? notifyErr.message : notifyErr}`)
+    }
     throw new Error(`ingestion failed for #${ticket}: ${message}`)
   }
   await github.close(ticket)
@@ -232,6 +293,25 @@ export async function contextCheck(number: number, deps: Deps): Promise<void> {
   log(await context(['check'], pr.body))
 }
 
+// Posts a labeled issue to the team Slack channel. Skips, without failing, when no webhook is set.
+// The webhook URL is a secret, so it never appears in a log line or an error message.
+export async function notify(number: number, deps: Deps): Promise<'skipped' | 'posted'> {
+  const { github, slackWebhook, fetch: post = fetch, log = console.log } = deps
+  if (!slackWebhook) {
+    log('Slack webhook not configured; skipping')
+    return 'skipped'
+  }
+  const text = slackMessage(await github.labelNotice(number, NEEDS_HUMAN))
+  const response = await post(slackWebhook, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, unfurl_links: false, unfurl_media: false }),
+  })
+  if (!response.ok) throw new Error(`Slack webhook returned ${response.status}: ${(await response.text()).slice(0, 200)}`)
+  log(`#${number}: posted to Slack`)
+  return 'posted'
+}
+
 // GitHub over fetch ------------------------------------------------------------------------------
 
 const ISSUE_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
@@ -246,6 +326,17 @@ const ISSUE_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   }
 }
 fragment ref on Issue { number title state labels(first: 50) { nodes { name } } }`
+
+// The newest label events and the newest comment, so `last:` gets the right end of each list.
+const NOTICE_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      number title url
+      timelineItems(last: 50, itemTypes: [LABELED_EVENT]) { nodes { ... on LabeledEvent { actor { login } label { name } } } }
+      comments(last: 1) { nodes { author { login } body url } }
+    }
+  }
+}`
 
 type RawRef = { number: number; title: string; state: 'OPEN' | 'CLOSED'; labels: { nodes: { name: string }[] } }
 const ref = (raw: RawRef): IssueRef => ({ number: raw.number, title: raw.title, state: raw.state, labels: raw.labels.nodes.map((l) => l.name) })
@@ -312,6 +403,35 @@ export function restGitHub(token: string, repository: string): GitHub {
     async close(number) {
       await call('PATCH', `${issues}/${number}`, { state: 'closed', state_reason: 'completed' })
     },
+    async labelNotice(number, label) {
+      type Login = { login: string } | null
+      const result = (await call('POST', '/graphql', { query: NOTICE_QUERY, variables: { owner, name, number } })) as {
+        data?: {
+          repository: {
+            issue: {
+              number: number
+              title: string
+              url: string
+              timelineItems: { nodes: { actor: Login; label: { name: string } }[] }
+              comments: { nodes: { author: Login; body: string; url: string }[] }
+            } | null
+          }
+        }
+        errors?: { message: string }[]
+      }
+      if (result.errors?.length) throw new Error(`GraphQL: ${result.errors.map((e) => e.message).join('; ')}`)
+      const raw = result.data?.repository.issue
+      if (!raw) throw new Error(`issue #${number} not found`)
+      const event = raw.timelineItems.nodes.filter((e) => e.label?.name === label).at(-1)
+      const comment = raw.comments.nodes.at(-1)
+      return {
+        number: raw.number,
+        title: raw.title,
+        url: raw.url,
+        labeledBy: event?.actor?.login ?? null,
+        comment: comment ? { author: comment.author?.login ?? null, body: comment.body, url: comment.url } : null,
+      }
+    },
   }
 }
 
@@ -336,11 +456,16 @@ if (import.meta.main) {
     if (!arg || !/^\d+$/.test(arg) || extra.length) throw new Error(USAGE)
     const token = process.env.GITHUB_TOKEN
     if (!token) throw new Error('GITHUB_TOKEN is not set')
-    const deps: Deps = { github: restGitHub(token, process.env.GITHUB_REPOSITORY ?? 'vibing-out/vbt'), context: runContext }
+    const deps: Deps = {
+      github: restGitHub(token, process.env.GITHUB_REPOSITORY ?? 'vibing-out/vbt'),
+      context: runContext,
+      slackWebhook: process.env.SLACK_WEBHOOK_URL, // an unset repository secret arrives as ''
+    }
     if (command === 'check') await check(Number(arg), deps)
     else if (command === 'landed') await landed(Number(arg), deps)
     else if (command === 'unblock') await unblock(Number(arg), deps)
     else if (command === 'context-check') await contextCheck(Number(arg), deps)
+    else if (command === 'notify') await notify(Number(arg), deps)
     else throw new Error(USAGE)
   } catch (err) {
     console.error(err instanceof Error ? err.message : err)

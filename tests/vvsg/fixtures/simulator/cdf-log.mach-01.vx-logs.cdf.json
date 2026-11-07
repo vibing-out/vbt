@@ -1,0 +1,61 @@
+{
+  "ElectionEventLog": {
+    "GeneratedTime": "2026-11-03T06:00:05.000Z",
+    "Device": [
+      {
+        "Type": "scan-single",
+        "Id": "mach-01",
+        "Version": "vbt-sim-1.0.0",
+        "Event": [
+          {
+            "Id": "polls-opened",
+            "Type": "user-action",
+            "Disposition": "success",
+            "Sequence": 0,
+            "TimeStamp": "2026-11-03T06:00:00.000Z",
+            "UserId": "poll_worker",
+            "Description": "Polls opened."
+          },
+          {
+            "Id": "vote-cast",
+            "Type": "device-event",
+            "Disposition": "success",
+            "Sequence": 1,
+            "TimeStamp": "2026-11-03T06:00:01.000Z",
+            "UserId": "machine",
+            "Description": "Ballot cast.",
+            "Details": "{\"ballotId\":\"ballot-288fa068\"}"
+          },
+          {
+            "Id": "vote-cast",
+            "Type": "device-event",
+            "Disposition": "success",
+            "Sequence": 2,
+            "TimeStamp": "2026-11-03T06:00:02.000Z",
+            "UserId": "machine",
+            "Description": "Ballot cast.",
+            "Details": "{\"ballotId\":\"ballot-f0f0266b\"}"
+          },
+          {
+            "Id": "export-cast-vote-record-complete",
+            "Type": "user-action",
+            "Disposition": "success",
+            "Sequence": 3,
+            "TimeStamp": "2026-11-03T06:00:03.000Z",
+            "UserId": "poll_worker",
+            "Description": "Cast vote record export complete."
+          },
+          {
+            "Id": "polls-closed",
+            "Type": "user-action",
+            "Disposition": "success",
+            "Sequence": 4,
+            "TimeStamp": "2026-11-03T06:00:04.000Z",
+            "UserId": "poll_worker",
+            "Description": "Polls closed."
+          }
+        ]
+      }
+    ]
+  }
+}

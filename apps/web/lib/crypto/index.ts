@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { Totals } from "@vbt/domain";
+import type { BatchTotals } from "@vbt/domain";
 import type { ContestTotals, CryptoPort } from "./port";
 
 // The one adapter between apps/web and @vbt/crypto (approver decision on #19).
@@ -74,7 +74,7 @@ export function keys(env: Readonly<Record<string, string | undefined>> = process
 }
 
 /** @vbt/crypto's ContestTotals with a ballot count, as @vbt/domain's cross-checks compare them. */
-export function toTotals(contests: ContestTotals, ballotCount: number): Totals {
+export function toTotals(contests: ContestTotals, ballotCount: number): BatchTotals {
   return { ballotCount, contests };
 }
 

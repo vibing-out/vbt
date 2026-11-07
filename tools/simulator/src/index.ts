@@ -1,0 +1,13 @@
+export type * from "./types.ts";
+export { createRng, hashSeed, streamSeed, type Rng } from "./prng.ts";
+export * from "./fixture.ts";
+export { allocateBallots, cvrPath, DEFAULTS, machinePath, simulate, validateOptions } from "./generate.ts";
+export { canonicalJson, writeOutput } from "./write.ts";
+export { FAULT_CHECK, FAULT_TYPES, FAULT_WEIGHTS, faultCountFor, selectFaults, type FaultTarget } from "./faults.ts";
+export { buildMachineLog, castBallotIds, createClock, EVENT_IDS } from "./formats/cdf-log.ts";
+export { buildCvrReport, snapshotId } from "./formats/cvr.ts";
+export { buildManifest, MANIFEST_PATH } from "./formats/manifest.ts";
+export { sameCounts, sumTotals, tallyCvrs, totalsPath } from "./formats/totals.ts";
+export { validateCdfLog } from "./validate/cdf.ts";
+export { validateCvrReport } from "./validate/cvr.ts";
+export { main, parseCliArgs, USAGE } from "./cli.ts";

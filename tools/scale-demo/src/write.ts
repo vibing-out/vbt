@@ -148,8 +148,8 @@ export interface RunSeedInput {
 }
 
 /**
- * Plans, builds (all crypto, before any connection), then writes in one transaction. With the default
- * adapter before E3 the build throws, so no connection is ever opened.
+ * Plans, builds (all crypto, before any connection), then writes in one transaction. A build failure
+ * (a bad key, a failed signature check) throws before any connection is opened.
  */
 export async function runSeed(input: RunSeedInput, deps: RunSeedDeps = {}): Promise<SeedRows> {
   const crypto = deps.crypto ?? DEFAULT_CRYPTO;

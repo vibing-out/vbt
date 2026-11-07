@@ -1,7 +1,7 @@
 // Spec AC4: the load test only reads the public lookup endpoints, with GET.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { ENDPOINTS, NAME_TAGS, pathFor, requestPaths, SEED_CODES, settings } from "./config.ts";
+import { ENDPOINTS, NAME_TAGS, notFoundPaths, pathFor, requestPaths, SEED_CODES, settings } from "./config.ts";
 
 const defaults = requestPaths(settings({}));
 const TRACK_PATHS = defaults.track;
@@ -69,6 +69,21 @@ describe("record path template overrides", () => {
       "/api/record/b/TALLIED_PRECINCT",
       "/api/record/a/TALLIED_PRECINCT",
     ]);
+  });
+});
+
+describe("tracking code overrides", () => {
+  const s = settings({ TRACK_CODES: "AB-1,CD-2", UNKNOWN_CODES: "ZZ-9" });
+  const paths = requestPaths(s);
+
+  it("requests TRACK_CODES then UNKNOWN_CODES, round-robin", () => {
+    expect(paths.track).toEqual(["/api/track/AB-1", "/api/track/CD-2", "/api/track/ZZ-9"]);
+    expect([0, 1, 2, 3].map((i) => pathFor(paths, "track", i))).toEqual([...paths.track, paths.track[0]]);
+  });
+
+  it("marks only the UNKNOWN_CODES paths as expecting 404", () => {
+    expect([...notFoundPaths(s)]).toEqual(["/api/track/ZZ-9"]);
+    expect(notFoundPaths(settings({})).size).toBe(0);
   });
 });
 

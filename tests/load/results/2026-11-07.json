@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "runDate": "2026-11-07",
+  "k6Version": "v2.3.0",
+  "target": "Production build (next build && next start) of main at the commit www.ballottrack.org serves, run outside Vercel; its tracker reads an in-memory demo election, no database",
+  "nanoLimitsEmulated": false,
+  "tested": {
+    "trackRatePerSecond": 50,
+    "recordRatePerSecond": 0,
+    "duration": "5m"
+  },
+  "endpoints": {
+    "track": {
+      "requests": 15000,
+      "medianMs": 1,
+      "p95Ms": 3,
+      "p99Ms": 5.2,
+      "errorRate": 0,
+      "rateLimitedRate": 0,
+      "notFoundRate": 0.3333
+    },
+    "record": {
+      "requests": 0,
+      "medianMs": null,
+      "p95Ms": null,
+      "p99Ms": null,
+      "errorRate": null,
+      "rateLimitedRate": null,
+      "notFoundRate": null
+    }
+  },
+  "thresholdsPassed": true
+}

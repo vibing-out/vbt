@@ -1,12 +1,10 @@
-// Test-only: a fake CryptoAdapter so the seed can be exercised before E3. Its "ciphertexts" are
+// Test-only: a fake CryptoAdapter so the seed's rows can be inspected. Its "ciphertexts" are
 // readable JSON and its signatures are plain hashes: worthless as crypto, and runSeed accepts it only
 // with a localhost database (scratch databases the tests create and drop). Never imported by the CLI.
 
 import { createHash } from "node:crypto";
+import { TRACKING_CODE_PATTERN } from "@vbt/crypto";
 import type { CryptoAdapter, StageRecord } from "../crypto-adapter.ts";
-
-// epic/4 packages/crypto/src/trackingCode.ts TRACKING_CODE_PATTERN.
-const TRACKING_CODE_PATTERN = /^[A-Z]{3,8}-[A-Z]{3,8}-[0-9A-HJKMNP-TV-Z]{4}-[A-Z]{3,8}$/;
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const WORDS = ["AMBER", "BIRCH", "CEDAR", "DELTA", "EMBER", "FJORD", "GROVE", "HARBOR"];
 

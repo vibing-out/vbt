@@ -1,6 +1,14 @@
 // Spec AC1: scenarios, thresholds and env overrides.
 import { describe, expect, it } from "vitest";
-import { baseUrl, buildOptions, isExpectedStatus, isRateLimited, settings } from "./config.ts";
+import {
+  baseUrl,
+  buildOptions,
+  DEFAULT_TARGET_DESCRIPTION,
+  isExpectedStatus,
+  isRateLimited,
+  SEED_CODES,
+  settings,
+} from "./config.ts";
 
 describe("buildOptions defaults", () => {
   const options = buildOptions({});
@@ -106,9 +114,64 @@ describe("env overrides", () => {
 
 describe("expected statuses", () => {
   it("counts 2xx, 3xx and 429 as expected and everything else as failed", () => {
-    expect([200, 304, 399, 429].every(isExpectedStatus)).toBe(true);
-    expect([0, 199, 400, 404, 500, 503].some(isExpectedStatus)).toBe(false);
+    expect([200, 304, 399, 429].every((s) => isExpectedStatus(s))).toBe(true);
+    expect([0, 199, 400, 404, 500, 503].some((s) => isExpectedStatus(s))).toBe(false);
     expect(isRateLimited(429)).toBe(true);
     expect(isRateLimited(200)).toBe(false);
+  });
+
+  it("expects 404 (or 429) for an unknown code, and counts a 200 or a 5xx there as failed", () => {
+    expect([404, 429].every((s) => isExpectedStatus(s, true))).toBe(true);
+    expect([200, 304, 400, 500, 503].some((s) => isExpectedStatus(s, true))).toBe(false);
+  });
+});
+
+describe("tracking codes", () => {
+  it("defaults to the seed codes and no unknown codes", () => {
+    expect(settings({})).toMatchObject({ trackCodes: SEED_CODES, unknownCodes: [] });
+  });
+
+  it("takes TRACK_CODES and UNKNOWN_CODES as trimmed comma-separated lists", () => {
+    expect(settings({ TRACK_CODES: " A-1 , B-2 ", UNKNOWN_CODES: "X-9" })).toMatchObject({
+      trackCodes: ["A-1", "B-2"],
+      unknownCodes: ["X-9"],
+    });
+  });
+
+  it.each([{ TRACK_CODES: "A-1,,B-2" }, { UNKNOWN_CODES: "X-9, " }, { TRACK_CODES: "A-1", UNKNOWN_CODES: "A-1" }])(
+    "rejects %o",
+    (env) => expect(() => settings(env)).toThrow(),
+  );
+});
+
+describe("RECORD_RATE=0", () => {
+  const options = buildOptions({ RECORD_RATE: "0", MAX_VUS: "150" });
+
+  it("runs only the track scenario, so MAX_VUS is the whole run's cap", () => {
+    expect(Object.keys(options.scenarios)).toEqual(["track"]);
+    expect(options.scenarios.track).toMatchObject({ maxVUs: 150 });
+  });
+
+  it("drops the record p95 threshold and keeps the rest", () => {
+    expect(options.thresholds).toEqual({
+      "http_req_duration{endpoint:track,status:200}": ["p(95)<500"],
+      http_req_failed: ["rate<0.01"],
+      rate_limited: ["rate<0.05"],
+    });
+  });
+
+  it("still rejects a zero TRACK_RATE", () => {
+    expect(() => buildOptions({ TRACK_RATE: "0" })).toThrow();
+  });
+});
+
+describe("TARGET_DESCRIPTION", () => {
+  it("defaults to the local Supabase description and accepts an override", () => {
+    expect(settings({}).targetDescription).toBe(DEFAULT_TARGET_DESCRIPTION);
+    expect(settings({ TARGET_DESCRIPTION: "  In-memory demo build  " }).targetDescription).toBe("In-memory demo build");
+  });
+
+  it.each(["http://localhost:3000", "build on localhost", "server at 127.0.0.1"])("rejects a URL or host: %s", (t) => {
+    expect(() => settings({ TARGET_DESCRIPTION: t })).toThrow(/not give its URL/);
   });
 });

@@ -14,6 +14,9 @@ Both scenarios use k6's `constant-arrival-rate` executor for 5 minutes (`preAllo
 - p95 of `200` responses under **500 ms**, for each endpoint
 - `http_req_failed` under 1%. A `429` from the `/api/track` rate limiter is an expected status, not a failure.
 - `rate_limited` (share of `429`s) under 5%, so a run the limiter mostly throttled can't pass on fast `429`s.
+- A `404` for an `UNKNOWN_CODES` code is expected and counted in `track_not_found`, not as a failure. Any other status for an unknown code (a `200` included) fails, and so does a `404` for a `TRACK_CODES` code.
+
+With `RECORD_RATE=0` the record scenario and its p95 threshold are left out, for targets with no `/api/record` route.
 
 ## Where it runs, and why not production
 
@@ -37,6 +40,7 @@ supabase start                       # applies supabase/migrations and supabase/
 # Put the local URL and keys that `supabase status` prints into apps/web/.env.local.
 pnpm --filter web build && pnpm --filter web start   # production build on http://localhost:3000
 
+mkdir -p tests/load/results          # k6 does not create the results folder
 LOAD_K6_VERSION="$(k6 version)" k6 run tests/load/lookup.ts
 ```
 
@@ -48,18 +52,21 @@ LOAD_K6_VERSION="$(k6 version)" k6 run tests/load/lookup.ts
 | --- | --- | --- |
 | `BASE_URL` | `http://localhost:3000` | Origin of the app under test |
 | `TRACK_RATE` | `50` | Requests per second on `/api/track/{code}` |
-| `RECORD_RATE` | `5` | Requests per second on `/api/record/{scope}/{stage}` |
+| `RECORD_RATE` | `5` | Requests per second on `/api/record/{scope}/{stage}`; `0` turns the record scenario off |
 | `DURATION` | `5m` | k6 duration, such as `30s` or `1m30s` |
 | `MAX_VUS` | `75` | `maxVUs` for each scenario (two scenarios, so twice this in total). `preAllocatedVUs` is 50, or `MAX_VUS` if lower |
 | `RECORD_SCOPES` | `18097-001,18097-002,18057-001` | Comma-separated `{scope}` values for `/api/record/{scope}/{stage}` |
 | `RECORD_STAGE` | `TALLIED_PRECINCT` | `{stage}` value for `/api/record/{scope}/{stage}` |
+| `TRACK_CODES` | `SEED-0001`..`SEED-0050` | Comma-separated codes the target holds (expected `200`) |
+| `UNKNOWN_CODES` | (none) | Comma-separated codes the target must not hold (expected `404`); none may repeat a `TRACK_CODES` entry |
+| `TARGET_DESCRIPTION` | Local production build against local Supabase | What was tested, written into the results file. No URL or host |
 | `LOAD_K6_VERSION` | (unset) | Output of `k6 version`, recorded in the results |
 
 These are k6 settings, not app environment variables, so they aren't in `.env.example`.
 
 ## What the results file holds
 
-Only aggregates: per endpoint the request count, median, p95 and p99 latency of `200` responses, error rate and `429` rate; plus the tested rates and duration, the k6 version, the run date (date only), a description of the target and whether every threshold passed. No tracking codes, URLs or times of day (CLAUDE.md: no voter identity, no ordering leaks). Requests carry an `endpoint` tag and a templated `name` tag so per-code URLs never form their own metrics.
+Only aggregates: per endpoint the request count, median, p95 and p99 latency of `200` responses, error rate, `429` rate and expected-`404` rate; plus the tested rates and duration, the k6 version, the run date (date only), a description of the target and whether every threshold passed. No tracking codes, URLs or times of day (CLAUDE.md: no voter identity, no ordering leaks). Requests carry an `endpoint` tag and a templated `name` tag so per-code URLs never form their own metrics.
 
 ## Tests
 

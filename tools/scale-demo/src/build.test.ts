@@ -1,7 +1,7 @@
 import { MISMATCH_REASON } from "@vbt/domain";
+import { stageLeaves } from "@vbt/events";
 import { beforeAll, expect, test } from "vitest";
 import { buildRows, CAST_AT, readKeys, type SeedRows, TALLY_AT } from "./build.ts";
-import { E3_PENDING, pendingCrypto } from "./crypto-adapter.ts";
 import { buildPlan } from "./plan.ts";
 import { FAKE_KEY_ENV, type FakeCrypto, fakeCrypto } from "./testing/fake-crypto.ts";
 
@@ -22,10 +22,6 @@ const eventsOf = (ballotId: string) => {
   while (chain.length < mine.length) chain.push(mine.find((e) => e.prev_hash === chain.at(-1)!.hash)!);
   return chain;
 };
-
-test("with pendingCrypto the build throws E3_PENDING before producing any row", async () => {
-  await expect(buildRows(plan, pendingCrypto, keys)).rejects.toThrow(E3_PENDING);
-});
 
 test("tracking codes chain per machine; each machine's first code chains to null", () => {
   for (const precinct of plan.precincts) {
@@ -84,22 +80,20 @@ test("tallied ballots get the precinct batch's STATUS_CHANGE with its batch_id",
   }
 });
 
-test("event hashes chain and cover only public fields with the date, never the time", () => {
+test("event hashes chain over the locked fields: tracking code and the date, never the time", () => {
   const ballot = rows.ballots[0]!;
   const chain = eventsOf(ballot.id);
   chain.forEach((e, i) => {
     expect(e.prev_hash).toBe(i === 0 ? null : chain[i - 1]!.hash);
     expect(e.hash).toBe(
       crypto.eventHash({
-        prevHash: e.prev_hash,
-        ballotId: e.ballot_id,
-        precinctId: e.precinct_id,
-        countyId: e.county_id,
-        eventType: e.event_type,
-        fromStatus: e.from_status,
-        toStatus: e.to_status,
+        tracking_code: ballot.tracking_code,
+        event_type: e.event_type,
+        from_status: e.from_status,
+        to_status: e.to_status,
         reason: e.reason,
-        occurredOn: "2026-11-03",
+        occurred_on: "2026-11-03",
+        prev_hash: e.prev_hash,
       }),
     );
   });
@@ -123,13 +117,11 @@ test("one batch and one stage record per precinct; ballot_count leaves the misma
   }
 });
 
-test("Merkle leaves are the tallied ballots' ciphertext hashes, sorted", () => {
+test("Merkle leaves are @vbt/events' stage leaves of the tallied ballots", () => {
   expect(crypto.merkleCalls).toHaveLength(4);
   plan.precincts.forEach((p, i) => {
-    const expected = rows.ballots
-      .filter((b) => b.precinct_id === p.id && !rows.statuses.find((s) => s.id === b.id)!.mismatch)
-      .map((b) => b.ciphertext_hash)
-      .sort();
+    const tallied = rows.ballots.filter((b) => b.precinct_id === p.id && !rows.statuses.find((s) => s.id === b.id)!.mismatch);
+    const expected = stageLeaves(tallied).map((l) => Buffer.from(l).toString("hex"));
     expect(crypto.merkleCalls[i]).toEqual(expected);
   });
 });

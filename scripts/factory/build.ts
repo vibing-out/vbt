@@ -418,14 +418,23 @@ export async function build(number: number, deps: BuildDeps): Promise<'skipped' 
 
 export const run: Exec = (command, args, options = {}) =>
   new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd: options.cwd ?? REPO_ROOT, stdio: ['pipe', 'pipe', 'pipe'] })
+    // No input means no stdin at all. With input, a child that exits without reading it (a fast-failing gh or
+    // git) closes the pipe early: the write's EPIPE is expected and the exit code says what happened, so it is
+    // swallowed rather than crashing the runner as an unhandled 'error' event.
+    const withInput = options.input !== undefined
+    const child = spawn(command, args, { cwd: options.cwd ?? REPO_ROOT, stdio: [withInput ? 'pipe' : 'ignore', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''
-    child.stdout.on('data', (chunk) => (stdout += chunk))
-    child.stderr.on('data', (chunk) => (stderr += chunk))
+    child.stdout?.on('data', (chunk) => (stdout += chunk))
+    child.stderr?.on('data', (chunk) => (stderr += chunk))
     child.on('error', reject)
     child.on('close', (code) => resolve({ code: code ?? 1, stdout, stderr }))
-    child.stdin.end(options.input ?? '')
+    if (child.stdin) {
+      child.stdin.on('error', (err: NodeJS.ErrnoException) => {
+        if (err.code !== 'EPIPE') reject(err)
+      })
+      child.stdin.end(options.input)
+    }
   })
 
 if (import.meta.main) {

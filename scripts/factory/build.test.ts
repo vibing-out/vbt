@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
-  branchName, build, decisions, hasSlot, parseClaude, prBody, reviewVerdict, STAGES, verdict, withContract, withoutVerdict,
+  branchName, build, decisions, run, hasSlot, parseClaude, prBody, reviewVerdict, STAGES, verdict, withContract, withoutVerdict,
   type BuildDeps, type Exec, type Stage,
 } from './build.ts'
 import { check as checkReport } from './report.ts'
@@ -112,6 +112,20 @@ describe('reviewVerdict', () => {
   })
   it('strips the VERDICT line before the report is checked', () => {
     expect(withoutVerdict(`${EXAMPLE}\n**VERDICT:** clean`)).toBe(EXAMPLE.trim())
+  })
+})
+
+describe('run', () => {
+  // The T-90 shadow run crashed with an unhandled EPIPE when a command exited before reading its input.
+  it('survives a command that exits without reading its input', async () => {
+    const result = await run('sh', ['-c', 'exit 3'], { input: 'x'.repeat(4 * 1024 * 1024) })
+    expect(result.code).toBe(3)
+  })
+  it('passes input to a command that reads it', async () => {
+    expect((await run('cat', [], { input: 'hello' })).stdout).toBe('hello')
+  })
+  it('runs a command with no input and no stdin', async () => {
+    expect((await run('sh', ['-c', 'cat; echo done'])).stdout).toBe('done\n')
   })
 })
 

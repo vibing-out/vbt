@@ -763,9 +763,9 @@ describe('sync tickets for an epic that conflicts with main', () => {
     'find epic pull for #2',
     'create "T-00a Sync epic/2 with main" in #2: `main` and `epic/2` both changed the same lines, so epic pull request #39 conflicts and cannot merge.',
     'label #50 +queued',
-    'comment #39 This pull request conflicts with `main`. Opened #50 to merge `main` into `epic/2`.',
     'context #50 ## Context from earlier tickets',
     'label #50 +factory-ready',
+    'comment #39 This pull request conflicts with `main`. Opened #50 to merge `main` into `epic/2`.',
   ]
 
   it('recognizes only a T-00 sync title for the same epic', () => {
@@ -778,6 +778,17 @@ describe('sync tickets for an epic that conflicts with main', () => {
     const { github, deps } = setup()
     expect(await epicReady(2, deps)).toBe('conflict')
     expect(github.calls).toEqual(opened)
+  })
+  it('still dispatches the sync ticket when commenting on the epic pull request is refused (#78)', async () => {
+    const { github, lines, deps } = setup()
+    const comment = github.comment.bind(github)
+    github.comment = async (n, body) => {
+      if (n === 39) throw new Error('403 from POST /issues/39/comments: Resource not accessible by integration')
+      return comment(n, body)
+    }
+    expect(await epicReady(2, deps)).toBe('conflict')
+    expect(github.calls).toEqual(opened.slice(0, -1))
+    expect(lines).toContain('epic #2: could not comment on #39: 403 from POST /issues/39/comments: Resource not accessible by integration')
   })
   it('opens no second sync ticket while one is open', async () => {
     const { github, lines, deps } = setup([ref(12, 'T-04 Schema'), ref(57, 'T-00a Sync epic/2 with main')])

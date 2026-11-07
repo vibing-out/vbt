@@ -380,10 +380,12 @@ describeDb("AC7: only service_role may execute the T-09 functions", () => {
               has_function_privilege('authenticated', p.oid, 'EXECUTE') as authenticated,
               has_function_privilege('service_role', p.oid, 'EXECUTE') as service
        from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-       where (n.nspname = 'public' and p.proname like 'official\\_%') or n.nspname = 'private' order by 1`,
+       where (n.nspname = 'public' and p.proname like 'official\\_%')
+          -- T-05's private.chain_heads_for is reachable only through its security definer wrapper, so
+          -- service_role has no EXECUTE on it by design; T-05's own tests cover it.
+          or (n.nspname = 'private' and p.proname <> 'chain_heads_for') order by 1`,
     );
-    // Private helpers: event_hash, event_chain_head and record_uploads (T-09), chain_heads_for (T-05).
-    expect(rows.length).toBe(NEW_FUNCTIONS.length + 4);
+    expect(rows.length).toBe(NEW_FUNCTIONS.length + 3);
     for (const row of rows) expect(row, row.name).toMatchObject({ anon: false, authenticated: false, service: true });
   });
 

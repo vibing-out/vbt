@@ -36,9 +36,16 @@ export function CardHeader({ className, ...props }: ComponentProps<"div">) {
   return <div data-slot="card-header" className={cn("flex flex-col gap-1", className)} {...props} />;
 }
 
-export function CardTitle({ className, mode = "voter", ...props }: ComponentProps<"h3"> & { mode?: Mode }) {
+/** Renders `h2` by default so a card directly under a page `h1` keeps the outline in order; pass `level={3}` inside an `h2` section. */
+export function CardTitle({
+  className,
+  mode = "voter",
+  level = 2,
+  ...props
+}: ComponentProps<"h2"> & { mode?: Mode; level?: 2 | 3 }) {
+  const Heading = level === 3 ? "h3" : "h2";
   return (
-    <h3
+    <Heading
       data-slot="card-title"
       className={cn(mode === "admin" ? "text-heading" : "text-title", className)}
       {...props}

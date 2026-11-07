@@ -13,7 +13,13 @@ export function queuedPull(headRef: string): number {
   return Number(match[1])
 }
 
-if (import.meta.main) {
+import { realpathSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
+
+// import.meta.main is missing on some Node versions, where the CLI would silently do nothing.
+const isMain = import.meta.main ?? (process.argv[1] !== undefined && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)
+
+if (isMain) {
   try {
     console.log(queuedPull(process.argv[2] ?? ''))
   } catch (err) {

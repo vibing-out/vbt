@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "election": { "county_name": "Marion County", "name": "General Election", "date": "2026-11-03" },
+  "precincts": [
+    { "id": "18097-001", "name": "Center 1" },
+    { "id": "18097-002", "name": "Center 2" },
+    { "id": "18057-001", "name": "Fall Creek 1" }
+  ],
+  "manifest": {
+    "contests": [
+      {
+        "id": "us-senate",
+        "title": "United States Senator",
+        "vote_for": 1,
+        "selections": [
+          { "id": "sen-oakley", "name": "Dana Oakley" },
+          { "id": "sen-brandt", "name": "Morgan Brandt" },
+          { "id": "sen-ferris", "name": "Jules Ferris" }
+        ]
+      },
+      {
+        "id": "secretary-of-state",
+        "title": "Secretary of State",
+        "vote_for": 1,
+        "selections": [
+          { "id": "sos-lindqvist", "name": "Priya Lindqvist" },
+          { "id": "sos-harlow", "name": "Theo Harlow" }
+        ]
+      },
+      {
+        "id": "school-board",
+        "title": "School Board, At Large",
+        "vote_for": 2,
+        "selections": [
+          { "id": "sb-castellan", "name": "Rosa Castellan" },
+          { "id": "sb-whitcomb", "name": "Eli Whitcomb" },
+          { "id": "sb-nakamura", "name": "Kenji Nakamura" }
+        ]
+      },
+      {
+        "id": "public-question-1",
+        "title": "Public Question 1: Library Bond",
+        "vote_for": 1,
+        "selections": [
+          { "id": "pq1-yes", "name": "Yes" },
+          { "id": "pq1-no", "name": "No" }
+        ]
+      }
+    ],
+    "ballot_styles": [
+      {
+        "id": "general-2026",
+        "contest_ids": ["us-senate", "secretary-of-state", "school-board", "public-question-1"]
+      }
+    ]
+  },
+  "ballots": [
+    {
+      "tracking_code": "SEED-0001",
+      "precinct_id": "18097-001",
+      "machine_id": "M-18097-001-A",
+      "ballot_style": "general-2026",
+      "cast_date": "2026-11-03",
+      "choices": {
+        "us-senate": ["sen-oakley"],
+        "secretary-of-state": ["sos-harlow"],
+        "school-board": ["sb-castellan", "sb-nakamura"],
+        "public-question-1": ["pq1-yes"]
+      }
+    },
+    {
+      "tracking_code": "SEED-0002",
+      "precinct_id": "18097-001",
+      "machine_id": "M-18097-001-A",
+      "ballot_style": "general-2026",
+      "cast_date": "2026-11-03",
+      "choices": {
+        "us-senate": ["sen-brandt"],
+        "school-board": ["sb-whitcomb"]
+      }
+    },
+    {
+      "tracking_code": "SEED-0018",
+      "precinct_id": "18097-002",
+      "machine_id": "M-18097-002-A",
+      "ballot_style": "general-2026",
+      "cast_date": "2026-11-03",
+      "choices": {
+        "us-senate": ["sen-ferris"],
+        "secretary-of-state": ["sos-lindqvist"],
+        "school-board": ["sb-castellan", "sb-whitcomb"],
+        "public-question-1": ["pq1-no"]
+      }
+    },
+    {
+      "tracking_code": "SEED-0035",
+      "precinct_id": "18057-001",
+      "machine_id": "M-18057-001-A",
+      "ballot_style": "general-2026",
+      "cast_date": "2026-11-03",
+      "choices": {
+        "us-senate": ["sen-oakley"],
+        "secretary-of-state": ["sos-lindqvist"],
+        "school-board": ["sb-nakamura"],
+        "public-question-1": ["pq1-yes"]
+      }
+    }
+  ]
+}

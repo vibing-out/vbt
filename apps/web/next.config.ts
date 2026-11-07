@@ -6,7 +6,13 @@ const nextConfig: NextConfig = {
   transpilePackages: ["@vbt/ui", "@vbt/domain", "@vbt/events"],
   // The public tracker is the product's front door.
   async redirects() {
-    return [{ source: "/", destination: "/track", permanent: false }];
+    return [
+      { source: "/", destination: "/track", permanent: false },
+      // The receipt moved out of /track so the tracker sources hold no contact wording.
+      { source: "/track/:code/receipt", destination: "/receipt/:code", permanent: false },
+      // The printable demo sheet sits outside /track for the same reason.
+      { source: "/track/demo-receipts", destination: "/demo-receipts", permanent: false },
+    ];
   },
 };
 

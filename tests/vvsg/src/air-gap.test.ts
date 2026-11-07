@@ -18,6 +18,12 @@ const OUTBOUND_ALLOWLIST: Record<string, string> = {
   "apps/web/lib/context-log.ts": "our own Supabase: the team's context-log project",
   "apps/web/lib/require-role.ts": "our own Supabase: Auth session, role and MFA check",
   "apps/web/lib/service-db.ts": "our own Supabase: service-role RPCs for ingest and batches (T-05)",
+  "apps/web/lib/official-db.ts": "our own Supabase: service-role RPCs for uploads, batches and challenges (T-09)",
+  "apps/web/app/login/login-form.tsx": "our own Supabase: official sign-in and MFA in the browser (T-09)",
+  "apps/web/app/official/batch-form.tsx": "same origin: POST /api/batches (T-09)",
+  "apps/web/app/official/challenges/resolve-form.tsx": "same origin: POST /api/challenges/:id/resolve (T-09)",
+  "apps/web/app/official/upload/upload-form.tsx": "same origin: POST /api/events (T-09)",
+  "apps/web/app/track/tracker.tsx": "same origin: GET /api/track/:code for the voter's tracker",
   "supabase/scripts/seed-demo-officials.ts": "our own Supabase: creates the demo officials (run by a human)",
   "tools/verifier/src/cli.ts": "public verifier: read-only download of the published record from the --base-url a citizen gives",
 };

@@ -1,8 +1,8 @@
 import { Receipt } from "@vbt/ui/components/receipt";
 import { headers } from "next/headers";
 import Link from "next/link";
-import { lookup, sampleCodes } from "../../../lib/demo-election";
-import { receiptOrigin, receiptQrSvg } from "../../../lib/receipt-qr";
+import { lookup, sampleCodes } from "../../lib/demo-election";
+import { receiptOrigin, receiptQrSvg } from "../../lib/receipt-qr";
 import "./demo-receipts.css";
 import { PrintButton } from "./print-button";
 

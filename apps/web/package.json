@@ -22,6 +22,7 @@
     "@vbt/domain": "workspace:*",
     "@vbt/events": "workspace:*",
     "@vbt/ui": "workspace:*",
+    "@vercel/firewall": "^1.2.6",
     "flags": "^4.4.0",
     "jsqr": "1.4.0",
     "next": "16.4.5",

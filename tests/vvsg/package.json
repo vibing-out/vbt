@@ -10,7 +10,7 @@
     "test": "vitest run"
   },
   "devDependencies": {
-    "@types/node": "24.10.1",
+    "@types/node": "26.6.6",
     "@types/pg": "8.23.1",
     "@vbt/supabase": "workspace:*",
     "ajv": "8.20.0",

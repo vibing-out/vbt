@@ -13,7 +13,7 @@
   },
   "devDependencies": {
     "@supabase/supabase-js": "2.119.0",
-    "@types/node": "24.10.1",
+    "@types/node": "26.6.6",
     "@types/pg": "8.23.1",
     "@vbt/crypto": "workspace:*",
     "@vbt/domain": "workspace:*",
